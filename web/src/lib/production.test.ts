@@ -12,7 +12,7 @@ describe("production desk workflow", () => {
   });
 
   it("keeps review work human-gated and filters failed jobs accurately", () => {
-    expect(nextOperation("awaiting_asset_review")).toEqual({ gate: "assets", label: "Review generated images" });
+    expect(nextOperation("awaiting_asset_review")).toEqual({ gate: "assets", label: "Approve storyboard & unlock image upload" });
     expect(visibleEpisodes([{ id: "a", status: "assets_ready" }], "failed", { a: [{ id: "job", kind: "video", status: "failed" }] })).toHaveLength(1);
   });
 

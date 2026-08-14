@@ -1,0 +1,64 @@
+name: 🐛 Báo Cáo Lỗi (Bug Report)
+description: Báo cáo lỗi hoạt động hoặc vấn đề kỹ thuật trong Nightmare Studio
+title: "[Bug]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Cảm ơn bạn đã gửi báo cáo lỗi! Vui lòng cung cấp chi tiết theo các mục bên dưới để đội ngũ dễ dàng tái hiện và xử lý.
+  - type: input
+    id: prd_srs_link
+    attributes:
+      label: SRS / PRD Liên quan (nếu có)
+      description: Nhập ID mục SRS hoặc PRD liên quan (ví dụ SRS §4.2, PRD-03).
+      placeholder: SRS §4.2
+    validations:
+      required: false
+  - type: textarea
+    id: description
+    attributes:
+      label: Mô tả lỗi
+      description: Giải thích rõ ràng và ngắn gọn lỗi xảy ra là gì.
+      placeholder: Khi nhấn nút "Generate Storyboard", hệ thống không hiển thị loading indicator...
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Các bước tái hiện (Steps to Reproduce)
+      description: Liệt kê các bước cụ thể để tái hiện lỗi này.
+      value: |
+        1. Đi tới '...'
+        2. Nhấn vào '...'
+        3. Cuộn xuống '....'
+        4. Thấy lỗi xuất hiện
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Hành vi kỳ vọng (Expected Behavior)
+      description: Hệ thống đáng lẽ phải hoạt động như thế nào.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Môi trường & Phiên bản (Environment)
+      description: Thông tin môi trường chạy ứng dụng.
+      value: |
+        - OS: [ví dụ: Windows 11 / Ubuntu 22.04 / macOS]
+        - Python: [ví dụ: 3.12.2]
+        - Node.js: [ví dụ: 20.11.0]
+        - Browser: [ví dụ: Chrome 124]
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log / Dữ liệu lỗi liên quan
+      description: Dán terminal output, console log hoặc stacktrace nếu có.
+      render: shell
+    validations:
+      required: false

@@ -1,0 +1,16 @@
+# Code Owners for Nightmare Studio
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repository
+* @ngocminh2k
+
+# Backend & Python logic
+/app/ @ngocminh2k
+/tests/ @ngocminh2k
+/pyproject.toml @ngocminh2k
+
+# Frontend & Web UI
+/web/ @ngocminh2k
+
+# CI/CD Workflows & Governance
+/.github/ @ngocminh2k

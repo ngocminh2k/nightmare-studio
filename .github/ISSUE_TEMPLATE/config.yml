@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Tài Liệu Kỹ Thuật (Architecture & PRD)
+    url: https://github.com/ngocminh2k/nightmare-studio/tree/main/docs
+    about: Tìm hiểu kiến trúc, tài liệu PRD, SRS và các tiêu chuẩn của dự án.
+  - name: 💬 Báo Cáo Sự Cố Bảo Mật (Security Policy)
+    url: https://github.com/ngocminh2k/nightmare-studio/security/policy
+    about: Vui lòng xem chính sách SECURITY.md để báo cáo lỗ hổng an toàn thông tin.

@@ -1,0 +1,50 @@
+name: ✨ Đề Xuất Tính Năng (Feature Request)
+description: Đề xuất tính năng mới hoặc cải tiến cho Nightmare Studio
+title: "[Feature]: "
+labels: ["enhancement", "proposal"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Đề xuất tính năng mới cho Nightmare Studio cần phù hợp với định hướng thiết kế và kiến trúc được quy định trong CODING_STANDARDS.md.
+  - type: input
+    id: prd_reference
+    attributes:
+      label: Liên kết PRD / SRS (PRD / SRS Reference)
+      description: Mã định danh trong PRD/SRS mà tính năng này trực thuộc hoặc bổ sung.
+      placeholder: PRD-04 hoặc SRS §5.1
+    validations:
+      required: true
+  - type: textarea
+    id: problem_statement
+    attributes:
+      label: Vấn đề / Nhu cầu thực tế (Problem Statement)
+      description: Vấn đề bạn đang gặp phải hoặc lý do tại sao cần tính năng này.
+      placeholder: Biên tập viên cần khả năng tải lên ảnh tùy chỉnh cho từng phân cảnh trong storyboard...
+    validations:
+      required: true
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Giải pháp đề xuất (Proposed Solution)
+      description: Mô tả chi tiết tính năng hoạt động như thế nào từ góc nhìn người dùng và kiến trúc hệ thống.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Tiêu chí chấp nhận (Acceptance Criteria & TDD Scope)
+      description: Các tiêu chí cụ thể để nghiệm thu tính năng và kịch bản test RED/GREEN dự kiến.
+      value: |
+        - [ ] Kịch bản 1: ...
+        - [ ] Kịch bản 2: ...
+        - [ ] Có bài test tự động (Unit / Integration) bao phủ đạt chuẩn >= 80% coverage.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Các giải pháp thay thế đã cân nhắc (Alternatives Considered)
+      description: Mô tả các giải pháp hoặc thư viện khác bạn đã thử hoặc cân nhắc.
+    validations:
+      required: false
