@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.coverage
+.pytest_cache/
+htmlcov/
+
+# Node / Web Build & Cache
+node_modules/
+.next/
+dist/
+build/
+coverage/
+test-results/
+*.tsbuildinfo
+
+# Environments & Secrets
+.env
+.env.local
+*.env
+!.env.example
+
+# Application Data & Outputs
+outputs/
+data/outputs/
+data/canvas-cdp-profile/
+*.db
+*.sqlite
+*.sqlite3
+
+# Tool & IDE Caches
+.codebase-memory/
+.vscode/
+.idea/
+*.log

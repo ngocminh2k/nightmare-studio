@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#121416" />
+    <title>Nightmare Studio</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#workspace">Skip to workspace</a>
+    <main id="workspace" class="workspace" aria-label="Nightmare Studio workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">LOCAL PRODUCTION DESK</p>
+          <h1>Nightmare Studio</h1>
+          <p class="lede">A disciplined editorial room for horror episodes.</p>
+        </div>
+        <button id="open-project-dialog" data-testid="create-project" class="primary" type="button">New project</button>
+      </header>
+
+      <section class="metrics" aria-label="Production overview">
+        <article><span>Projects</span><strong id="project-count">0</strong></article>
+        <article><span>Episodes</span><strong id="episode-count">0</strong></article>
+        <article><span>Tracked cost</span><strong id="cost-total">$0.00</strong></article>
+        <article><span>Providers</span><strong id="provider-summary">Local</strong></article>
+      </section>
+
+      <section class="desk-grid">
+        <section class="panel projects-panel" aria-labelledby="projects-heading">
+          <div class="panel-heading"><div><p class="eyebrow">CHANNELS</p><h2 id="projects-heading">Projects</h2></div></div>
+          <div id="projects" class="project-list" aria-live="polite"></div>
+        </section>
+        <section class="panel episode-panel" aria-labelledby="episodes-heading">
+          <div class="panel-heading"><div><p class="eyebrow">EDITORIAL QUEUE</p><h2 id="episodes-heading">Episodes</h2></div><button id="open-episode-dialog" class="secondary" type="button" disabled>New episode</button></div>
+          <div id="episodes" class="episode-list" aria-live="polite"></div>
+        </section>
+        <aside class="panel detail-panel" aria-labelledby="detail-heading">
+          <p class="eyebrow">CASE FILE</p><h2 id="detail-heading">Select an episode</h2>
+          <div id="episode-detail" class="episode-detail"><p>Choose an episode to inspect its workflow, review gate, and production actions.</p></div>
+        </aside>
+      </section>
+      <p id="notice" role="status" class="notice"></p>
+    </main>
+
+    <dialog id="project-dialog">
+      <form id="project-form" method="dialog">
+        <div class="dialog-heading"><h2>Open a project</h2><button class="icon-button" data-dialog-dismiss type="button" aria-label="Close">×</button></div>
+        <label>Project name<input name="name" required maxlength="120" placeholder="Night Shift" /></label>
+        <label>Description<textarea name="description" maxlength="2000" placeholder="A first-person horror channel"></textarea></label>
+        <label>Brand bible<textarea name="brand_bible" maxlength="20000" placeholder="Tone, voice, target audience, visual rules"></textarea></label>
+        <div class="dialog-actions"><button data-dialog-dismiss type="button" class="secondary">Cancel</button><button class="primary" type="submit">Create project</button></div>
+      </form>
+    </dialog>
+    <dialog id="episode-dialog">
+      <form id="episode-form" method="dialog">
+        <div class="dialog-heading"><h2>Log an episode</h2><button class="icon-button" data-dialog-dismiss type="button" aria-label="Close">×</button></div>
+        <label>Title<input name="title" required maxlength="200" placeholder="The elevator stopped at an impossible floor" /></label>
+        <label>Source URL<input name="source_url" maxlength="2000" placeholder="https://…" /></label>
+        <label>Source text<textarea name="source_text" maxlength="100000" placeholder="Paste the source material or editorial brief."></textarea></label>
+        <div class="dialog-actions"><button data-dialog-dismiss type="button" class="secondary">Cancel</button><button class="primary" type="submit">Create episode</button></div>
+      </form>
+    </dialog>
+    <script src="/app.js" defer></script>
+  </body>
+</html>
