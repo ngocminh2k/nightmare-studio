@@ -15,7 +15,12 @@ from .media import DeterministicMediaProvider, MediaProvider, build_motion_promp
 from .nanobanana_prompt_rules import NANOBANANA_IMAGE_RULES, NANOBANANA_NEGATIVE_PROMPT
 from .providers import DeterministicLLMProvider, LLMProvider
 from .repository import StudioRepository
-
+from .systemone import (
+    SystemOneClient,
+    calculate_shot_duration,
+    classify_shot_type,
+    decide_scene_transition,
+)
 
 BEAT_EXTRACTION_INSTRUCTION = (
     "Compress this horror story chunk into tension beats. Return one pipe-delimited line per beat: "
@@ -138,25 +143,48 @@ def edit_script_markdown(plan: list[dict[str, Any]]) -> str:
     ) + "\n"
 
 
-def apply_director_pacing(scenes: list[dict[str, Any]], script: str) -> list[dict[str, Any]]:
-    """Set a <=5-second visual beat for every scene before image or video production."""
+def apply_director_pacing(
+    scenes: list[dict[str, Any]], script: str, client: SystemOneClient | None = None
+) -> list[dict[str, Any]]:
+    """Set dynamic 4s-8s visual beats for every scene before image or video production."""
+    if not scenes:
+        return []
 
     script_words = re.findall(r"\S+", script)
     script_duration = len(script_words) / 2.5  # 150 words/minute narration reference.
-    visual_budget = min(script_duration, len(scenes) * 5)
+    visual_budget = min(script_duration, len(scenes) * 8.0)
     scene_weights = [max(1, len(re.findall(r"\S+", str(scene.get("narration") or "")))) for scene in scenes]
     weight_total = sum(scene_weights) or 1
-    for scene, weight in zip(scenes, scene_weights):
-        computed_target = min(5, max(0.8, visual_budget * weight / weight_total))
+
+    for index, (scene, weight) in enumerate(zip(scenes, scene_weights)):
+        narration = str(scene.get("narration") or "")
         try:
-            directed_target = float(scene.get("target_duration_seconds"))
+            directed_target = (
+                float(scene["target_duration_seconds"])
+                if scene.get("target_duration_seconds") is not None
+                else None
+            )
         except (TypeError, ValueError):
-            directed_target = computed_target
-        target = min(5, max(0.8, directed_target))
+            directed_target = None
+
+        if directed_target is not None:
+            target = directed_target
+        elif client is not None:
+            target = calculate_shot_duration(client, narration)
+        else:
+            target = visual_budget * weight / weight_total
+
+        target = min(8.0, max(4.0, target))
         scene["target_duration_seconds"] = round(target, 2)
         scene["script_duration_seconds"] = round(script_duration, 2)
         scene["visual_duration_budget_seconds"] = round(visual_budget, 2)
         scene["motion_prompt"] = build_motion_prompt(scene)
+
+        if client is not None:
+            scene["shot_type"] = classify_shot_type(client, narration)
+            next_narration = str(scenes[index + 1].get("narration") or "") if index + 1 < len(scenes) else ""
+            scene["transition"] = decide_scene_transition(client, narration, next_narration)
+
     return scenes
 
 
@@ -215,11 +243,13 @@ class JobRunner:
         llm_provider: LLMProvider | None = None,
         media_provider: MediaProvider | None = None,
         audio_provider: AudioProvider | None = None,
+        systemone_client: SystemOneClient | None = None,
     ):
         self.repository = repository
         self.llm_provider = llm_provider or DeterministicLLMProvider()
         self.media_provider = media_provider or DeterministicMediaProvider()
         self.audio_provider = audio_provider or configured_audio_provider()
+        self.systemone_client = systemone_client
 
     def enqueue(self, episode_id: str, kind: str) -> dict[str, Any]:
         if kind not in self.SUPPORTED_KINDS:
@@ -285,7 +315,7 @@ class JobRunner:
         if episode["status"] != EpisodeStatus.SCRIPT_APPROVED.value:
             raise ValueError("Storyboard requires an approved script")
         script = episode["script_final"].strip() or episode["script_draft"].strip()
-        scenes = build_storyboard_scenes(script, self.llm_provider)
+        scenes = build_storyboard_scenes(script, self.llm_provider, client=self.systemone_client)
         if not scenes:
             raise ValueError("Approved script has no usable narration")
         self.repository.update_job(job["id"], progress=65)
@@ -300,7 +330,7 @@ class JobRunner:
             raise ValueError("Image CSV export and video-prompt preparation require an approved storyboard")
         scenes = episode["storyboard"]
         if not all(scene.get("target_duration_seconds") for scene in scenes):
-            scenes = apply_director_pacing(scenes, episode["script_final"].strip() or episode["script_draft"].strip())
+            scenes = apply_director_pacing(scenes, episode["script_final"].strip() or episode["script_draft"].strip(), client=self.systemone_client)
             self.repository.update_episode(episode["id"], storyboard=scenes)
         output_dir = self.repository.database_path.parent / "outputs" / episode["id"]
         csv_path = write_image_prompt_csv(output_dir / "image_prompts.csv", scenes)
@@ -483,7 +513,7 @@ def _markdown_rows(markdown: str, expected_columns: int) -> list[list[str]]:
     return rows
 
 
-def _fallback_storyboard_scenes(script: str) -> list[dict[str, Any]]:
+def _fallback_storyboard_scenes(script: str, client: SystemOneClient | None = None) -> list[dict[str, Any]]:
     """Create a 48-shot plan for full-length scripts, matching the legacy pipeline's cadence."""
 
     words = re.findall(r"\S+", script)
@@ -513,19 +543,23 @@ def _fallback_storyboard_scenes(script: str) -> list[dict[str, Any]]:
         }
         scene["motion_prompt"] = build_motion_prompt(scene)
         scenes.append(scene)
-    return apply_director_pacing(scenes, script)
+    return apply_director_pacing(scenes, script, client=client)
 
 
-def build_storyboard_scenes(script: str, llm_provider: LLMProvider | None = None) -> list[dict[str, Any]]:
+def build_storyboard_scenes(
+    script: str,
+    llm_provider: LLMProvider | None = None,
+    client: SystemOneClient | None = None,
+) -> list[dict[str, Any]]:
     """Use the configured legacy scene-table and 1:1 image-prompt stages when an LLM is available."""
     if not script.strip() or not llm_provider or isinstance(llm_provider, DeterministicLLMProvider):
-        return _fallback_storyboard_scenes(script)
+        return _fallback_storyboard_scenes(script, client=client)
     if len(script) > STORYBOARD_LLM_MAX_SCRIPT_CHARS:
         # The legacy draft is ~5,000 words. Asking a router model to emit a 100+-row scene
         # table in one completion stalls on output tokens; use the deterministic 48-shot plan
         # instead so production never hangs on a single oversized prompt.
         # ponytail: feed the script to the scene splitter in beat-sized chunks and renumber.
-        return _fallback_storyboard_scenes(script)
+        return _fallback_storyboard_scenes(script, client=client)
     scene_instruction = (
         "You are a professional storyboard director. Split the literary script into visual scenes of 250-350 characters. "
         "Do not fix the scene count; follow the story rhythm. Direct a target screen time from 0.8 to 5.0 seconds for each scene: linger for dread, shorten reveals, and never exceed five seconds. "
@@ -554,9 +588,9 @@ def build_storyboard_scenes(script: str, llm_provider: LLMProvider | None = None
             scene = {"number": number, "narration": scene_row[1], "visual_description": scene_row[2], "target_duration_seconds": scene_row[3], "shot": "Storyboard-defined composition", "prompt": prompt_row[0], "negative_prompt": prompt_row[1], "asset_status": "pending"}
             scene["motion_prompt"] = build_motion_prompt(scene)
             scenes.append(scene)
-        return apply_director_pacing(scenes, script)
+        return apply_director_pacing(scenes, script, client=client)
     except (ValueError, IndexError, RuntimeError):
         # A provider outage (RuntimeError from RouterLLMProvider.generate) or malformed
         # LLM output must not hard-fail the storyboard job: fall back to the deterministic
         # 48-shot plan so the editorial pipeline keeps moving.
-        return _fallback_storyboard_scenes(script)
+        return _fallback_storyboard_scenes(script, client=client)

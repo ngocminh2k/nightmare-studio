@@ -56,8 +56,8 @@ def test_storyboard_director_sets_a_script_aware_max_five_second_screen_time():
     scenes = build_storyboard_scenes(" ".join("dread" for _ in range(800)))
 
     assert scenes
-    assert all(0.8 <= scene["target_duration_seconds"] <= 5 for scene in scenes)
-    assert sum(scene["target_duration_seconds"] for scene in scenes) <= len(scenes) * 5
+    assert all(4.0 <= scene["target_duration_seconds"] <= 8.0 for scene in scenes)
+    assert sum(scene["target_duration_seconds"] for scene in scenes) <= len(scenes) * 8.0
     assert all("first" in scene["motion_prompt"] for scene in scenes)
 
 
