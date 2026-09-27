@@ -12,7 +12,7 @@ from export_csv import write_image_prompt_csv
 from .audio import AudioProvider, configured_audio_provider
 from .domain import EpisodeStatus
 from .media import DeterministicMediaProvider, MediaProvider, build_motion_prompt, build_victor_kane_image_prompt
-from .nanobanana_prompt_rules import NANOBANANA_IMAGE_RULES
+from .nanobanana_prompt_rules import NANOBANANA_IMAGE_RULES, NANOBANANA_NEGATIVE_PROMPT
 from .providers import DeterministicLLMProvider, LLMProvider
 from .repository import StudioRepository
 
@@ -501,12 +501,14 @@ def _fallback_storyboard_scenes(script: str) -> list[dict[str, Any]]:
         if len(lead_words) > 22:
             lead = " ".join(lead_words[:20]) + "..."
         narration = lead or chunk_text
+        shot = "Medium close-up" if index % 2 == 0 else "Wide establishing shot"
         scene = {
             "number": index + 1,
             "narration": narration,
             "story_beat": chunk_text,
-            "shot": "Medium close-up" if index % 2 == 0 else "Wide establishing shot",
-            "prompt": build_victor_kane_image_prompt({"shot": "Medium close-up" if index % 2 == 0 else "Wide establishing shot", "narration": narration}),
+            "shot": shot,
+            "prompt": build_victor_kane_image_prompt({"shot": shot, "narration": narration, "story_beat": chunk_text}),
+            "negative_prompt": NANOBANANA_NEGATIVE_PROMPT,
             "asset_status": "pending",
         }
         scene["motion_prompt"] = build_motion_prompt(scene)
