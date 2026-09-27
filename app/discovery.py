@@ -39,7 +39,12 @@ class RedditSourceProvider:
             if not url or url in existing_urls:
                 continue
             title = title_link.get_text(" ", strip=True)
-            text = self._extract_story_text(self._read(url))
+            try:
+                story_html = self._read(url)
+            except Exception:
+                # A single deleted/rate-limited post must not abort crawling the remaining candidates.
+                continue
+            text = self._extract_story_text(story_html)
             if text:
                 return SourceStory(title=title, url=url, text=text)
         raise RuntimeError("No uncrawled r/nosleep story with extractable text was found")

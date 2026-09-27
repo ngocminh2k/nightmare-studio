@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 270" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Mặt nạ cũ rơi xuống sàn">
+  <defs>
+    <linearGradient id="floor6" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#0a0408"/>
+      <stop offset="1" stop-color="#1c0a14"/>
+    </linearGradient>
+    <radialGradient id="mask6" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#3a1622"/>
+      <stop offset="1" stop-color="#0a0408"/>
+    </radialGradient>
+    <filter id="blur6"><feGaussianBlur stdDeviation="2"/></filter>
+  </defs>
+  <rect width="480" height="270" fill="url(#floor6)"/>
+  <!-- Wood floor lines -->
+  <g stroke="#3a1622" stroke-width=".5" opacity=".5">
+    <path d="M0 40 H480 M0 80 H480 M0 120 H480 M0 160 H480 M0 200 H480 M0 240 H480"/>
+  </g>
+  <!-- Mask shadow -->
+  <ellipse cx="240" cy="220" rx="120" ry="20" fill="#000" opacity=".5" filter="url(#blur6)"/>
+  <!-- Mask -->
+  <g transform="translate(160 100)">
+    <ellipse cx="80" cy="60" rx="75" ry="50" fill="url(#mask6)" stroke="#dc143c" stroke-width="1.5"/>
+    <!-- Eyes -->
+    <ellipse cx="55" cy="50" rx="14" ry="8" fill="#000"/>
+    <ellipse cx="105" cy="50" rx="14" ry="8" fill="#000"/>
+    <circle cx="55" cy="50" r="3" fill="#dc143c" opacity=".7"/>
+    <circle cx="105" cy="50" r="3" fill="#dc143c" opacity=".7"/>
+    <!-- Mouth -->
+    <path d="M50 80 Q80 90 110 80 Q100 100 80 100 Q60 100 50 80 Z" fill="#000"/>
+    <!-- Crack -->
+    <path d="M40 30 L60 50 L40 70" stroke="#dc143c" stroke-width="1" fill="none" opacity=".8"/>
+    <!-- Highlight -->
+    <ellipse cx="40" cy="30" rx="20" ry="6" fill="#dc143c" opacity=".15"/>
+  </g>
+  <!-- Whisper -->
+  <g opacity=".18" fill="#f5e8c8" font-family="Georgia, serif" font-style="italic">
+    <text x="30" y="40" font-size="11">…whose face was it…</text>
+  </g>
+  <defs>
+    <radialGradient id="vig6" cx=".5" cy=".5" r=".8">
+      <stop offset=".5" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".8"/>
+    </radialGradient>
+  </defs>
+  <rect width="480" height="270" fill="url(#vig6)"/>
+</svg>

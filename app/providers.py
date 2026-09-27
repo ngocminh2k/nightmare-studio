@@ -111,11 +111,27 @@ def parse_chat_completion(raw: str) -> str:
             streamed_chunks.append(str(content))
     if streamed_chunks:
         return "".join(streamed_chunks).strip()
+    data = None
+    for candidate in [raw] + [line for line in raw.splitlines() if line.strip() and not line.startswith("data:")]:
+        try:
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                data = parsed
+                break
+        except json.JSONDecodeError:
+            continue
+    if data is None:
+        raise ValueError("LLM response did not contain a chat completion")
     try:
-        payload = json.loads(raw)
-        return str(payload["choices"][0]["message"]["content"]).strip()
-    except (IndexError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        payload = data.get("data", data) if isinstance(data, dict) else data
+        content = payload["choices"][0]["message"]["content"]
+    except (IndexError, KeyError, TypeError) as exc:
         raise ValueError("LLM response did not contain a chat completion") from exc
+    if not isinstance(content, str) or not content.strip():
+        # A tool-call-only or refused completion has null content; str(None) would become
+        # the literal script "None" and sail through every downstream validation.
+        raise ValueError("LLM response did not contain a chat completion")
+    return content.strip()
 
 
 class DeterministicLLMProvider:
@@ -147,10 +163,14 @@ class RouterLLMProvider:
                 except HTTPError as exc:
                     last_error = exc
                     if exc.code in {401, 403}:
-                        break
-                    if exc.code != 429:
-                        raise
+                        break  # Bad credentials for this model: try the fallback instead of hammering it.
+                    if 400 <= exc.code < 500 and exc.code != 429:
+                        break  # A request this model rejects will be rejected again; fall back.
                 except (URLError, TimeoutError, OSError) as exc:
+                    last_error = exc
+                except ValueError as exc:
+                    # Unparseable completion (refusal, tool call, truncated stream) is a
+                    # retryable provider failure, not a crash.
                     last_error = exc
                 self._sleeper(self.settings.llm_retry_delay_seconds * (2**attempt))
         raise RuntimeError(f"LLM request failed after model fallback: {last_error}")

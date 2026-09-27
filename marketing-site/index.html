@@ -1,0 +1,883 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0000" />
+  <meta name="description" content="Nightmare Studio — Local-first production desk cho video kinh dị narrated. Từ câu chuyện Reddit đến episode hoàn chỉnh qua 12 review gates có kiểm soát." />
+  <meta property="og:title" content="Nightmare Studio · Production Desk cho Horror Narration" />
+  <meta property="og:description" content="Local-first, review-gated, không tự động publish. Một editor cho cả workflow." />
+  <meta property="og:type" content="website" />
+  <title>Nightmare Studio · Production Desk cho Horror Narration</title>
+
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%23080000'/><path d='M32 12 L48 50 H16 Z' fill='none' stroke='%23dc143c' stroke-width='3'/><circle cx='32' cy='36' r='4' fill='%23dc143c'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600&display=swap" />
+  <link rel="stylesheet" href="assets/css/style.css" />
+  <link rel="stylesheet" href="assets/css/dashboard.css" />
+</head>
+
+<body data-theme="night">
+
+<!-- ============== AMBIENT LAYERS ============== -->
+<div class="ambient" aria-hidden="true">
+  <canvas id="fog-canvas" class="fog-canvas"></canvas>
+  <div class="vignette"></div>
+  <div class="grain"></div>
+  <div class="scanlines"></div>
+</div>
+
+<!-- ============== CURSOR FOLLOWER ============== -->
+<div class="cursor-ring" aria-hidden="true"></div>
+<div class="cursor-dot" aria-hidden="true"></div>
+
+<!-- ============== NAV ============== -->
+<header class="nav" id="nav">
+  <div class="nav__inner container">
+    <a class="nav__brand" href="#top" aria-label="Nightmare Studio">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="28" height="28">
+          <path d="M16 3 L29 27 H3 Z" fill="none" stroke="currentColor" stroke-width="2"/>
+          <circle cx="16" cy="20" r="2.4" fill="currentColor"/>
+        </svg>
+      </span>
+      <span class="brand-name">Nightmare<span>Studio</span></span>
+    </a>
+    <nav class="nav__links" aria-label="Primary">
+      <a href="#vision">Tầm nhìn</a>
+      <a href="#features">Tính năng</a>
+      <a href="#workflow">Workflow</a>
+      <a href="#operations">Vận hành</a>
+      <a href="#preview">Preview</a>
+      <a href="#stack">Stack</a>
+    </nav>
+    <div class="nav__actions">
+      <button class="theme-toggle" id="theme-toggle" aria-label="Toggle theme" title="Toggle theme">
+        <svg class="ico-sun" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="ico-moon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>
+      </button>
+      <a class="btn btn--ghost" href="#/dashboard" data-route="dashboard">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Mở desk
+      </a>
+      <a class="btn btn--blood" href="#cta">Bắt đầu</a>
+    </div>
+    <button class="nav__burger" id="nav-burger" aria-label="Mở menu" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="nav__panel" id="nav-panel" aria-hidden="true">
+    <a href="#vision">Tầm nhìn</a>
+    <a href="#features">Tính năng</a>
+    <a href="#workflow">Workflow</a>
+    <a href="#operations">Vận hành</a>
+    <a href="#preview">Preview</a>
+    <a href="#stack">Stack</a>
+    <a href="#cta" class="btn btn--blood btn--block">Bắt đầu</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============== HERO ============== -->
+  <section class="hero">
+    <div class="hero__bg" aria-hidden="true">
+      <div class="hero__rune"></div>
+      <div class="hero__pulse"></div>
+    </div>
+    <div class="container hero__inner">
+      <p class="eyebrow" data-reveal="fade-up">
+        <span class="dot"></span>
+        <span class="eyebrow__label">Local-first · Review-gated · Không tự động publish</span>
+      </p>
+
+      <h1 class="hero__title" data-glitch data-reveal="fade-up">
+        <span class="hero__title-line">Nightmare</span>
+        <span class="hero__title-line hero__title-line--alt">Studio</span>
+      </h1>
+
+      <p class="hero__lede" data-reveal="fade-up" data-delay="120">
+        Từ một câu chuyện <em>r/nosleep</em> đến một episode kinh dị narrated hoàn chỉnh —
+        qua 12 cổng review có kiểm soát, không cloud lock-in, không auto-publish trái phép.
+      </p>
+
+      <div class="hero__cta" data-reveal="fade-up" data-delay="240">
+        <a class="btn btn--blood btn--lg" href="#workflow">
+          <span>Xem 12-stage pipeline</span>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn--ghost btn--lg" href="#/dashboard" data-route="dashboard">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          <span>Mở operations desk</span>
+        </a>
+      </div>
+
+      <ul class="hero__stats" data-reveal="fade-up" data-delay="360">
+        <li><strong>12</strong><span>review gates</span></li>
+        <li><strong>0</strong><span>auto-publish</span></li>
+        <li><strong>1</strong><span>creator = owner</span></li>
+        <li><strong>100%</strong><span>local-first</span></li>
+      </ul>
+
+      <div class="hero__scroll" aria-hidden="true">
+        <span>Cuộn xuống</span>
+        <span class="hero__scroll-line"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== VISION ============== -->
+  <section id="vision" class="section vision">
+    <div class="container vision__grid">
+      <div class="vision__copy">
+        <p class="kicker" data-reveal="fade-up">TẦM NHÌN</p>
+        <h2 data-reveal="fade-up">Một production desk, không phải một publishing bot.</h2>
+        <p class="lead" data-reveal="fade-up" data-delay="80">
+          Nightmare Studio là <strong>local-first editorial desk</strong> cho người làm video horror narrated
+          dài hơi. Mục tiêu không phải "ra video nhanh nhất", mà là một pipeline <strong>đáng tin</strong>,
+          có thể <strong>truy vết được</strong> và <strong>không bao giờ tự xuất bản</strong> khi chưa qua review.
+        </p>
+        <ul class="vision__points" data-reveal="fade-up" data-delay="160">
+          <li><span class="check">✓</span><div><b>Source provenance.</b> Mỗi episode giữ URL gốc và lịch sử review — không mất dấu nguồn.</div></li>
+          <li><span class="check">✓</span><div><b>Review-gated.</b> Không có bước nào đi tiếp khi gate trước chưa được duyệt.</div></li>
+          <li><span class="check">✓</span><div><b>Resumable jobs.</b> Một job fail không phá hủy artifacts đã approved trước đó.</div></li>
+          <li><span class="check">✓</span><div><b>Secrets ở ngoài DB.</b> API key chỉ tồn tại trong env, không bao giờ vào source control.</div></li>
+        </ul>
+      </div>
+
+      <aside class="vision__card" data-reveal="zoom-in" data-delay="120">
+        <div class="card-head">
+          <span class="tag tag--red">EDITORIAL POLICY</span>
+          <span class="card-id">EP—{auto}</span>
+        </div>
+        <h3>Không publish lặng lẽ.</h3>
+        <p>
+          Mọi output đều phải đi qua một gate có chữ ký của creator:
+          script review → asset review → final review → publication handoff.
+        </p>
+        <div class="card-meta">
+          <div><span>Trạng thái</span><b data-status="review">ĐANG REVIEW</b></div>
+          <div><span>Gate</span><b>3 / 12</b></div>
+          <div><span>Provider</span><b>local-9router</b></div>
+          <div><span>Source</span><b>r/nosleep</b></div>
+        </div>
+        <div class="card-progress" aria-hidden="true">
+          <span style="--p:25%"></span>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ============== FEATURES ============== -->
+  <section id="features" class="section features">
+    <div class="container">
+      <header class="section__head" data-reveal="fade-up">
+        <p class="kicker">TÍNH NĂNG</p>
+        <h2>Sáu trụ cột của một episode hoàn chỉnh.</h2>
+        <p class="section__sub">
+          Mỗi trụ cột là một job độc lập — retry được, log được, không phụ thuộc vào nhau theo kiểu "all or nothing".
+        </p>
+      </header>
+
+      <div class="feature-grid">
+        <article class="feature" data-reveal="fade-up">
+          <div class="feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 4h12a4 4 0 0 1 4 4v12H8a4 4 0 0 1-4-4z"/><path d="M4 4v12a4 4 0 0 0 4 4"/></svg>
+          </div>
+          <h3>Story Discovery</h3>
+          <p>Tự động tìm và dedupe một source chưa được crawl từ r/nosleep. Có fallback paste URL hoặc text.</p>
+          <ul class="feature__bullets">
+            <li>Provenance URL</li>
+            <li>Dedupe local</li>
+            <li>Manual fallback</li>
+          </ul>
+        </article>
+
+        <article class="feature" data-reveal="fade-up" data-delay="80">
+          <div class="feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 17l4-4 3 3 7-7 4 4"/><path d="M14 9h7v7"/></svg>
+          </div>
+          <h3>AI Rewrite Gate</h3>
+          <p>LLM viết lại câu chuyện theo brand bible của project — không bao giờ đi thẳng đến media.</p>
+          <ul class="feature__bullets">
+            <li>Brand bible</li>
+            <li>Script review</li>
+            <li>Reject & requeue</li>
+          </ul>
+        </article>
+
+        <article class="feature" data-reveal="fade-up" data-delay="160">
+          <div class="feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="14" rx="1.5"/><path d="M3 9h18M7 14h4"/></svg>
+          </div>
+          <h3>Storyboard Studio</h3>
+          <p>Tách kịch bản đã duyệt thành scene có narration, shot, prompt và asset status rõ ràng.</p>
+          <ul class="feature__bullets">
+            <li>Per-scene</li>
+            <li>Veo prompts</li>
+            <li>Asset tracking</li>
+          </ul>
+        </article>
+
+        <article class="feature" data-reveal="fade-up">
+          <div class="feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="M21 17l-5-5-9 9"/></svg>
+          </div>
+          <h3>Scene Image Upload</h3>
+          <p>Xuất image_prompts.csv, creator tự render ảnh theo tên scene-NNN.png rồi upload đúng một lần.</p>
+          <ul class="feature__bullets">
+            <li>CSV template</li>
+            <li>Bulk upload</li>
+            <li>Per-scene path</li>
+          </ul>
+        </article>
+
+        <article class="feature" data-reveal="fade-up" data-delay="80">
+          <div class="feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M5 4l14 8-14 8z"/></svg>
+          </div>
+          <h3>Veo + Audio + Video</h3>
+          <p>Sinh Veo 3.1 prompt cuối cùng, audio narration, và render video qua Google Flow CDP.</p>
+          <ul class="feature__bullets">
+            <li>Veo 3.1 rules</li>
+            <li>TTS audio</li>
+            <li>CDP-backed clip</li>
+          </ul>
+        </article>
+
+        <article class="feature" data-reveal="fade-up" data-delay="160">
+          <div class="feature__icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 2v6M12 22v-6M2 12h6M22 12h6"/><circle cx="12" cy="12" r="4"/></svg>
+          </div>
+          <h3>Publication Handoff</h3>
+          <p>Final review có chữ ký, manifest xuất ra dạng portable episode package — chưa bao giờ auto upload.</p>
+          <ul class="feature__bullets">
+            <li>Final gate</li>
+            <li>Manifest export</li>
+            <li>Explicit handoff</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== WORKFLOW ============== -->
+  <section id="workflow" class="section workflow">
+    <div class="container">
+      <header class="section__head" data-reveal="fade-up">
+        <p class="kicker">WORKFLOW</p>
+        <h2>Mười hai gate. Không có shortcut.</h2>
+        <p class="section__sub">
+          Click vào từng gate để xem chi tiết. Một gate fail không phá artifacts trước đó — retry đúng chỗ fail.
+        </p>
+      </header>
+
+      <div class="pipeline" role="list" aria-label="Production pipeline">
+        <span class="pipeline__track" aria-hidden="true"></span>
+        <span class="pipeline__runner" aria-hidden="true"></span>
+
+        <button class="gate" role="listitem" data-step="1" data-state="done">
+          <span class="gate__num">01</span>
+          <span class="gate__name">Discovered</span>
+          <span class="gate__hint">source</span>
+        </button>
+        <button class="gate" role="listitem" data-step="2" data-state="done">
+          <span class="gate__num">02</span>
+          <span class="gate__name">Selected</span>
+          <span class="gate__hint">pick</span>
+        </button>
+        <button class="gate" role="listitem" data-step="3" data-state="done">
+          <span class="gate__num">03</span>
+          <span class="gate__name">Rewritten</span>
+          <span class="gate__hint">LLM</span>
+        </button>
+        <button class="gate is-current" role="listitem" data-step="4" data-state="current" aria-current="step">
+          <span class="gate__num">04</span>
+          <span class="gate__name">Script Review</span>
+          <span class="gate__hint">gate 1</span>
+        </button>
+        <button class="gate" role="listitem" data-step="5" data-state="todo">
+          <span class="gate__num">05</span>
+          <span class="gate__name">Storyboard</span>
+          <span class="gate__hint">split</span>
+        </button>
+        <button class="gate" role="listitem" data-step="6" data-state="todo">
+          <span class="gate__num">06</span>
+          <span class="gate__name">Asset Review</span>
+          <span class="gate__hint">gate 2</span>
+        </button>
+        <button class="gate" role="listitem" data-step="7" data-state="todo">
+          <span class="gate__num">07</span>
+          <span class="gate__name">Export CSV</span>
+          <span class="gate__hint">prompts</span>
+        </button>
+        <button class="gate" role="listitem" data-step="8" data-state="todo">
+          <span class="gate__num">08</span>
+          <span class="gate__name">Upload Scenes</span>
+          <span class="gate__hint">scenes</span>
+        </button>
+        <button class="gate" role="listitem" data-step="9" data-state="todo">
+          <span class="gate__num">09</span>
+          <span class="gate__name">Veo Prompts</span>
+          <span class="gate__hint">Veo 3.1</span>
+        </button>
+        <button class="gate" role="listitem" data-step="10" data-state="todo">
+          <span class="gate__num">10</span>
+          <span class="gate__name">Audio</span>
+          <span class="gate__hint">TTS</span>
+        </button>
+        <button class="gate" role="listitem" data-step="11" data-state="todo">
+          <span class="gate__num">11</span>
+          <span class="gate__name">Video</span>
+          <span class="gate__hint">Flow</span>
+        </button>
+        <button class="gate" role="listitem" data-step="12" data-state="todo">
+          <span class="gate__num">12</span>
+          <span class="gate__name">Final Review</span>
+          <span class="gate__hint">gate 3</span>
+        </button>
+      </div>
+
+      <article class="gate-detail" id="gate-detail" aria-live="polite">
+        <div class="gate-detail__head">
+          <span class="gate-detail__num" id="gd-num">04</span>
+          <div>
+            <h3 id="gd-title">Script Review</h3>
+            <p class="gate-detail__sub" id="gd-sub">Gate đầu tiên — quyết định rewrite có được đưa vào production.</p>
+          </div>
+          <span class="gate-detail__state" id="gd-state">ĐANG CHẠY</span>
+        </div>
+        <p id="gd-body">
+          Creator đọc lại kịch bản sau khi LLM viết lại. Duyệt hoặc yêu cầu chỉnh sửa.
+          Không có bước nào đi tiếp nếu gate này chưa ký.
+        </p>
+        <ul class="gate-detail__list" id="gd-list">
+          <li>Decision: <b>approve / request changes</b></li>
+          <li>Note, timestamp và state kế tiếp đều được persist</li>
+          <li>Reject sẽ requeue về Rewritten, giữ nguyên source provenance</li>
+        </ul>
+      </article>
+    </div>
+  </section>
+
+  <!-- ============== OPERATIONS ============== -->
+  <section id="operations" class="section ops">
+    <div class="container">
+      <header class="section__head" data-reveal="fade-up">
+        <p class="kicker">VẬN HÀNH</p>
+        <h2>Một desk thật — không phải một demo.</h2>
+        <p class="section__sub">
+          Production desk viết bằng Next.js + FastAPI. Mọi job là một task có log, retry và trạng thái rõ ràng.
+        </p>
+      </header>
+
+      <div class="ops-app" data-reveal="zoom-in">
+        <aside class="ops-app__sidebar">
+          <div class="ops-app__brand">
+            <span class="dot dot--green"></span>
+            <span>studio.local</span>
+            <span class="badge">v1.0</span>
+          </div>
+          <div class="ops-app__search">
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+            <input placeholder="Tìm episode, gate, scene…" aria-label="Tìm kiếm" />
+            <kbd>⌘K</kbd>
+          </div>
+          <nav class="ops-app__nav">
+            <a class="is-active"><span class="ico">▦</span>Dashboard</a>
+            <a><span class="ico">▶</span>Episodes <span class="counter">12</span></a>
+            <a><span class="ico">▤</span>Storyboard</a>
+            <a><span class="ico">♪</span>Audio Jobs <span class="counter counter--alert">2</span></a>
+            <a><span class="ico">◉</span>Video Queue <span class="counter">5</span></a>
+            <a><span class="ico">⊟</span>Assets</a>
+            <a><span class="ico">⚙</span>Settings</a>
+          </nav>
+          <div class="ops-app__provider">
+            <p>Active Provider</p>
+            <code>local-9router</code>
+            <span class="provider-state">connected · mrkane</span>
+          </div>
+        </aside>
+
+        <section class="ops-app__main">
+          <header class="ops-app__topbar">
+            <div class="ops-app__crumb">
+              <span>Episodes</span> <span class="sep">/</span>
+              <span>EP-0247</span> <span class="sep">/</span>
+              <strong>Script Review</strong>
+            </div>
+            <div class="ops-app__actions">
+              <button class="chip chip--ghost">Reject</button>
+              <button class="chip chip--blood">Approve → Storyboard</button>
+            </div>
+          </header>
+
+          <div class="ops-app__metrics">
+            <div class="metric"><b>3 / 12</b><span>Gate hiện tại</span></div>
+            <div class="metric"><b>04:12</b><span>Review time</span></div>
+            <div class="metric"><b>0</b><span>Failed jobs</span></div>
+            <div class="metric"><b>$0.42</b><span>Cost (cumulative)</span></div>
+          </div>
+
+          <div class="ops-app__split">
+            <div class="ops-app__panel">
+              <div class="panel-head">
+                <h4>Script — Scene 01 / 07</h4>
+                <span class="tag tag--ghost">Rewritten · draft</span>
+              </div>
+              <p class="script">
+                "Ngôi nhà ở cuối đường Harkness vẫn đứng đó, ánh đèn hắt qua khung cửa sổ
+                tầng hai như một con mắt chưa bao giờ chịu ngủ. Bà Whitmore kéo chăn lên
+                đến cằm, nhưng tiếng bước chân ở hành lang thì đã gần hơn rất nhiều so với
+                đêm qua…"
+              </p>
+              <div class="panel-foot">
+                <span>Brand bible: <code>mrkane · first-person · slow-burn</code></span>
+                <span>Words: <b>312</b></span>
+              </div>
+            </div>
+
+            <div class="ops-app__panel">
+              <div class="panel-head">
+                <h4>Activity log</h4>
+                <span class="tag tag--ghost">live</span>
+              </div>
+              <ul class="log">
+                <li><time>02:14</time> Source ingested — <code>r/nosleep/9f3a</code></li>
+                <li><time>02:16</time> Rewritten by <code>mrkane</code> · 1.2k tokens</li>
+                <li><time>02:18</time> Brand bible applied</li>
+                <li><time>02:19</time> Awaiting <b>script review</b> · 4m idle</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="ops-app__queue">
+            <div class="queue-head"><h4>Job queue</h4><span>auto-retry · resume-safe</span></div>
+            <ol class="queue">
+              <li><span class="dot dot--green"></span>storyboard · queued</li>
+              <li><span class="dot dot--mute"></span>asset review · blocked</li>
+              <li><span class="dot dot--mute"></span>export csv · blocked</li>
+              <li><span class="dot dot--mute"></span>upload scenes · blocked</li>
+              <li><span class="dot dot--mute"></span>veo prompts · blocked</li>
+            </ol>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== PREVIEW ============== -->
+  <section id="preview" class="section preview">
+    <div class="container">
+      <header class="section__head" data-reveal="fade-up">
+        <p class="kicker">PREVIEW SẢN PHẨM</p>
+        <h2>Một episode trông như thế này.</h2>
+        <p class="section__sub">
+          Storyboard, scene images và video clip đều được kiểm soát bởi cùng một state machine —
+          bạn thấy đúng thứ bạn sẽ publish.
+        </p>
+      </header>
+
+      <div class="preview__grid">
+        <article class="preview__card preview__card--player" data-reveal="fade-up">
+          <div class="player">
+            <div class="player__screen" style="background-image:url('assets/img/scene-01.svg')">
+              <button class="player__play" aria-label="Phát">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+              </button>
+              <div class="player__overlay">
+                <span class="player__scene">SCENE 03 / 07</span>
+                <span class="player__time">00:42 / 02:18</span>
+              </div>
+            </div>
+            <div class="player__controls">
+              <div class="player__bar"><span style="--p:30%"></span></div>
+              <div class="player__meta">
+                <span>"Harkness Road · The eye that won't sleep"</span>
+                <span>1080p · 24fps</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article class="preview__card" data-reveal="fade-up" data-delay="80">
+          <h4>Storyboard</h4>
+          <p>7 scene · đã duyệt</p>
+          <ul class="thumbs">
+            <li style="background-image:url('assets/img/scene-01.svg')"><span>01</span></li>
+            <li style="background-image:url('assets/img/scene-02.svg')"><span>02</span></li>
+            <li style="background-image:url('assets/img/scene-03.svg')"><span>03</span></li>
+            <li style="background-image:url('assets/img/scene-04.svg')"><span>04</span></li>
+            <li style="background-image:url('assets/img/scene-05.svg')"><span>05</span></li>
+            <li style="background-image:url('assets/img/scene-06.svg')"><span>06</span></li>
+            <li style="background-image:url('assets/img/scene-07.svg')"><span>07</span></li>
+          </ul>
+        </article>
+
+        <article class="preview__card" data-reveal="fade-up" data-delay="160">
+          <h4>Audio waveform</h4>
+          <p>Narration · 02:18 · 48 kHz</p>
+          <div class="wave" aria-hidden="true">
+            <span style="--i:1"></span><span style="--i:2"></span><span style="--i:3"></span>
+            <span style="--i:4"></span><span style="--i:5"></span><span style="--i:6"></span>
+            <span style="--i:7"></span><span style="--i:8"></span><span style="--i:9"></span>
+            <span style="--i:10"></span><span style="--i:11"></span><span style="--i:12"></span>
+            <span style="--i:13"></span><span style="--i:14"></span><span style="--i:15"></span>
+            <span style="--i:16"></span><span style="--i:17"></span><span style="--i:18"></span>
+            <span style="--i:19"></span><span style="--i:20"></span><span style="--i:21"></span>
+            <span style="--i:22"></span><span style="--i:23"></span><span style="--i:24"></span>
+            <span style="--i:25"></span><span style="--i:26"></span><span style="--i:27"></span>
+            <span style="--i:28"></span><span style="--i:29"></span><span style="--i:30"></span>
+          </div>
+        </article>
+
+        <article class="preview__card preview__card--wide" data-reveal="fade-up" data-delay="240">
+          <h4>Episode manifest</h4>
+          <p>Portable JSON · portable Markdown</p>
+          <pre class="code"><code>{
+  "id": "ep-0247",
+  "source": { "url": "r/nosleep/9f3a", "fetched_at": "2026-09-22T19:14Z" },
+  "state": "script_review",
+  "gate": 4,
+  "script_review": { "decision": null, "note": null, "decided_at": null },
+  "scenes": [
+    { "id": "scene-01", "narration_words": 312, "shot": "wide", "asset": "outputs/ep-0247/scene-01.png" },
+    { "id": "scene-02", "narration_words": 248, "shot": "closeup", "asset": "outputs/ep-0247/scene-02.png" }
+  ],
+  "veo_prompts": null,
+  "audio": null,
+  "video": null,
+  "publication": { "ready": false, "handoff_at": null }
+}</code></pre>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== STACK ============== -->
+  <section id="stack" class="section stack">
+    <div class="container">
+      <header class="section__head" data-reveal="fade-up">
+        <p class="kicker">KIẾN TRÚC</p>
+        <h2>Local-first. Đơn giản. Dễ kiểm.</h2>
+        <p class="section__sub">
+          Không multi-tenant cloud, không auto-publish, không secret trong database. Tất cả chạy trên máy bạn.
+        </p>
+      </header>
+
+      <div class="stack-grid">
+        <div class="stack-cell" data-reveal="fade-up">
+          <span class="stack-cell__num">01</span>
+          <h4>Next.js Production Desk</h4>
+          <p>UI operations cho editor và producer. Same-origin proxy sang FastAPI.</p>
+          <code>web/ · React · TypeScript</code>
+        </div>
+        <div class="stack-cell" data-reveal="fade-up" data-delay="80">
+          <span class="stack-cell__num">02</span>
+          <h4>FastAPI Backend</h4>
+          <p>Domain, repository và queue. State machine enforce hành vi hợp lệ ở tầng API.</p>
+          <code>app/ · Python · SQLite</code>
+        </div>
+        <div class="stack-cell" data-reveal="fade-up" data-delay="160">
+          <span class="stack-cell__num">03</span>
+          <h4>Local LLM via 9Router</h4>
+          <p>Rewrite qua brand bible, Veo prompts theo <code>veo-3.1-prompt-rules.md</code>. Fallback gemini nếu cần.</p>
+          <code>http://localhost:20128/v1</code>
+        </div>
+        <div class="stack-cell" data-reveal="fade-up" data-delay="240">
+          <span class="stack-cell__num">04</span>
+          <h4>Google Flow CDP</h4>
+          <p>Render video thật. Fail-closed khi không có CDP workspace — không bao giờ tự fake artifact.</p>
+          <code>chrome.exe --remote-debugging-port=9222</code>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== CTA ============== -->
+  <section id="cta" class="section cta">
+    <div class="container cta__inner" data-reveal="zoom-in">
+      <div class="cta__copy">
+        <p class="kicker">BẮT ĐẦU</p>
+        <h2>Một production desk không tự ý publish.</h2>
+        <p>
+          Clone, chạy <code>py -m uvicorn app.main:app --reload</code> và
+          <code>npm run dev</code> trong <code>web/</code>. Mở <code>http://127.0.0.1:3001</code>.
+        </p>
+      </div>
+      <div class="cta__buttons">
+        <a class="btn btn--blood btn--lg" href="#top">
+          <span>Xem lại từ đầu</span>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+        </a>
+        <a class="btn btn--ghost btn--lg" href="#workflow">
+          <span>Nhảy vào workflow</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============== OPERATIONS DASHBOARD ============== -->
+<section id="view-dashboard" class="view" hidden aria-label="Operations desk">
+  <div class="dash">
+    <aside class="dash-side" aria-label="Episodes">
+      <div class="dash-side__head">
+        <p class="dash-side__title">Episodes</p>
+        <div class="dash-side__search">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input id="dash-search" placeholder="Tìm episode…" aria-label="Tìm episode" />
+        </div>
+      </div>
+      <button class="dash-side__new" id="dash-new" type="button">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
+        New episode
+      </button>
+      <div class="dash-side__list" id="dash-ep-list"></div>
+      <div class="dash-side__foot">
+        <p>Storage</p>
+        <code id="dash-backend-info">in-browser · IndexedDB</code>
+        <a class="btn btn--ghost btn--block" href="#/" style="margin-top:8px">← Về landing</a>
+        <button class="btn btn--ghost btn--block" id="dash-reset" type="button" style="margin-top:6px; font-size:11px;">↻ Reset & re-seed demo</button>
+      </div>
+    </aside>
+
+    <main class="dash-main">
+      <div class="dash-empty" id="dash-empty">
+        <svg viewBox="0 0 64 64" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M32 8 L56 52 H8 Z"/><circle cx="32" cy="38" r="4" fill="currentColor"/></svg>
+        <h3>Chọn một episode hoặc tạo mới</h3>
+        <p>Bắt đầu bằng cách tạo một episode mới, hoặc chọn một episode đã có từ sidebar. Mọi state được lưu trong trình duyệt (IndexedDB) cho đến khi bạn gắn backend.</p>
+        <button class="btn btn--blood" id="dash-empty-new" type="button">+ Tạo episode đầu tiên</button>
+      </div>
+
+      <div id="dash-detail" hidden>
+        <header class="dash-topbar">
+          <div class="dash-topbar__title">
+            <span id="dash-ep-title">Untitled</span>
+            <small id="dash-ep-stage">discovered</small>
+          </div>
+          <div class="dash-topbar__crumb">
+            Episodes / <b id="dash-ep-id"></b>
+          </div>
+          <div class="dash-topbar__actions" id="dash-topbar-actions"></div>
+        </header>
+
+        <nav class="dash-tabs" id="dash-tabs" aria-label="Panes">
+          <button class="dash-tab is-active" data-tab="overview">Overview</button>
+          <button class="dash-tab" data-tab="script">Script</button>
+          <button class="dash-tab" data-tab="storyboard">Storyboard</button>
+          <button class="dash-tab" data-tab="assets">Assets</button>
+          <button class="dash-tab" data-tab="queue">Queue</button>
+          <button class="dash-tab" data-tab="logs">Logs</button>
+          <button class="dash-tab" data-tab="settings">Settings</button>
+        </nav>
+
+        <div class="dash-body">
+          <!-- OVERVIEW -->
+          <div class="dash-pane" id="pane-overview">
+            <div class="ov-grid">
+              <section class="ov-card">
+                <h4>Pipeline · <span id="ov-pipeline-label">0/13</span></h4>
+                <div id="ov-pipeline"></div>
+              </section>
+              <section class="ov-card">
+                <h4>Snapshot</h4>
+                <div class="ov-meta" id="ov-meta"></div>
+              </section>
+            </div>
+          </div>
+
+          <!-- SCRIPT -->
+          <div class="dash-pane" id="pane-script" hidden>
+            <div class="script-grid">
+              <section class="script-card" id="script-source">
+                <div class="script-card__head">
+                  <h3>Source</h3>
+                  <span class="tag tag--ghost" id="script-source-tag">draft</span>
+                </div>
+                <div class="script-editor">
+                  <label for="script-source-url">Source URL</label>
+                  <input id="script-source-url" placeholder="https://reddit.com/r/nosleep/…" />
+                  <label for="script-source-text">Source text</label>
+                  <textarea id="script-source-text" placeholder="Paste raw text tại đây hoặc dùng chức năng discovery..."></textarea>
+                </div>
+              </section>
+              <section class="script-card" id="script-rewrite">
+                <div class="script-card__head">
+                  <h3>Rewrite (LLM)</h3>
+                  <span class="tag tag--ghost" id="script-rewrite-tag">empty</span>
+                </div>
+                <div class="script-card__text" id="script-rewrite-text">Chưa có rewrite. Hãy chạy rewrite job.</div>
+              </section>
+              <section class="review-panel" id="script-review" hidden>
+                <h4>Script Review · Gate 1</h4>
+                <p>Creator đọc lại kịch bản sau khi LLM viết lại. Duyệt hoặc yêu cầu chỉnh sửa.</p>
+                <textarea id="script-review-note" placeholder="Ghi chú (tuỳ chọn)..." style="background:rgba(0,0,0,.4); border:1px solid var(--line); border-radius:8px; padding:10px 12px; color:var(--ink); font-family:var(--font-mono); font-size:13px; min-height:60px; resize:vertical;"></textarea>
+                <div class="review-actions" id="script-review-actions"></div>
+              </section>
+            </div>
+          </div>
+
+          <!-- STORYBOARD -->
+          <div class="dash-pane" id="pane-storyboard" hidden>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <h3 style="font-family:var(--font-display); font-size:18px; margin:0;">Scenes</h3>
+              <div style="display:flex; gap:8px;">
+                <button class="icon-btn" id="sb-add" type="button">+ Add scene</button>
+                <button class="icon-btn" id="sb-regenerate" type="button">↻ Regenerate all</button>
+              </div>
+            </div>
+            <div id="sb-list" class="sb-grid"></div>
+            <section class="review-panel" id="sb-review" hidden style="margin-top:18px;">
+              <h4>Asset Review · Gate 2</h4>
+              <p>Storyboard đã sẵn sàng — duyệt để xuất image CSV, hoặc gửi về revision.</p>
+              <textarea id="sb-review-note" placeholder="Ghi chú..." style="background:rgba(0,0,0,.4); border:1px solid var(--line); border-radius:8px; padding:10px 12px; color:var(--ink); font-family:var(--font-mono); font-size:13px; min-height:60px; resize:vertical;"></textarea>
+              <div class="review-actions" id="sb-review-actions"></div>
+            </section>
+          </div>
+
+          <!-- ASSETS -->
+          <div class="dash-pane" id="pane-assets" hidden>
+            <div class="dropzone" id="dropzone">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 16V4M6 10l6-6 6 6M4 20h16"/></svg>
+              <h4>Kéo thả hoặc click để upload scene images</h4>
+              <p>Đặt tên theo schema <code>scene-NNN.png</code> để auto-assign đúng scene.</p>
+              <small>Hỗ trợ PNG, JPG, WEBP. Tối đa 8MB mỗi file.</small>
+              <input type="file" id="asset-input" multiple accept="image/*" hidden />
+            </div>
+            <div class="asset-grid" id="asset-grid" style="margin-top:18px;"></div>
+            <div class="scene-map" id="scene-map"></div>
+            <section class="review-panel" id="assets-commit" hidden style="margin-top:18px;">
+              <h4>Commit scene upload</h4>
+              <p>Sau khi đủ ảnh cho mọi scene, commit để bắt đầu generate Veo prompts.</p>
+              <div class="review-actions">
+                <button class="btn btn--blood" id="commit-upload" type="button">Commit & tiếp tục → Veo prompts</button>
+              </div>
+            </section>
+          </div>
+
+          <!-- QUEUE -->
+          <div class="dash-pane" id="pane-queue" hidden>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+              <h3 style="font-family:var(--font-display); font-size:18px; margin:0;">Job queue</h3>
+              <button class="icon-btn" id="queue-rebuild" type="button">↻ Rebuild from current state</button>
+            </div>
+            <div class="queue-list" id="queue-list"></div>
+          </div>
+
+          <!-- LOGS -->
+          <div class="dash-pane" id="pane-logs" hidden>
+            <h3 style="font-family:var(--font-display); font-size:18px; margin:0 0 14px;">Activity log</h3>
+            <div class="log-list" id="log-list"></div>
+          </div>
+
+          <!-- SETTINGS -->
+          <div class="dash-pane" id="pane-settings" hidden>
+            <h3 style="font-family:var(--font-display); font-size:18px; margin:0 0 14px;">Episode settings</h3>
+            <div class="settings-form">
+              <div>
+                <label for="set-title">Title</label>
+                <input id="set-title" />
+              </div>
+              <div>
+                <label for="set-brandbible">Brand bible</label>
+                <textarea id="set-brandbible" placeholder="mrkane · first-person · slow-burn · narration 02:00-04:00..."></textarea>
+              </div>
+              <div class="settings-status is-mock" id="set-backend">
+                <span class="dot dot--green"></span>
+                <span>Backend: mock in-browser · IndexedDB</span>
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn btn--ghost" id="set-export" type="button">⤓ Export manifest (JSON)</button>
+                <button class="btn btn--blood" id="set-save" type="button">Save settings</button>
+              </div>
+              <div class="danger-zone">
+                <h4>Danger zone</h4>
+                <p>Xoá episode này kèm tất cả scenes, jobs, logs và assets.</p>
+                <button class="btn btn--ghost" id="set-delete" type="button" style="color:var(--bad); border-color:var(--bad);">Delete this episode</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- ============== MODALS ============== -->
+<div class="modal-back" id="modal-create" hidden>
+  <div class="modal">
+    <h3>Tạo episode mới</h3>
+    <p>Khởi tạo một production record mới. State ban đầu là <code>discovered</code>.</p>
+    <div class="modal__field">
+      <label for="m-title">Title</label>
+      <input id="m-title" placeholder="Ví dụ: The House on Harkness Road" />
+    </div>
+    <div class="modal__field">
+      <label for="m-source">Source URL (tuỳ chọn)</label>
+      <input id="m-source" placeholder="https://reddit.com/r/nosleep/…" />
+    </div>
+    <div class="modal__field">
+      <label for="m-brandbible">Brand bible (tuỳ chọn)</label>
+      <textarea id="m-brandbible" placeholder="voice, pacing, audience..."></textarea>
+    </div>
+    <div class="modal__actions">
+      <button class="btn btn--ghost" data-close-modal="modal-create" type="button">Huỷ</button>
+      <button class="btn btn--blood" id="m-submit" type="button">Tạo episode</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toast-stack" aria-live="polite"></div>
+
+<!-- ============== FOOTER ============== -->
+<footer class="foot">
+  <div class="container foot__inner">
+    <div class="foot__brand">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="24" height="24"><path d="M16 3 L29 27 H3 Z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="16" cy="20" r="2.4" fill="currentColor"/></svg>
+      </span>
+      <div>
+        <strong>Nightmare Studio</strong>
+        <p>Local-first production desk cho horror narration videos.</p>
+      </div>
+    </div>
+    <div class="foot__cols">
+      <div>
+        <h5>Sections</h5>
+        <a href="#vision">Tầm nhìn</a>
+        <a href="#features">Tính năng</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#operations">Vận hành</a>
+        <a href="#preview">Preview</a>
+      </div>
+      <div>
+        <h5>Workflow</h5>
+        <a href="#workflow">12 gates</a>
+        <a href="#preview">Storyboard</a>
+        <a href="#preview">Audio · Video</a>
+        <a href="#cta">Publication</a>
+      </div>
+      <div>
+        <h5>Stack</h5>
+        <a href="#stack">Next.js</a>
+        <a href="#stack">FastAPI</a>
+        <a href="#stack">9Router</a>
+        <a href="#stack">Flow CDP</a>
+      </div>
+    </div>
+  </div>
+  <div class="container foot__bottom">
+    <span>© Nightmare Studio · Built local-first.</span>
+    <span class="status"><span class="dot dot--green"></span> 12-stage pipeline · ready</span>
+  </div>
+</footer>
+
+<script src="assets/js/app.js" defer></script>
+<script src="assets/js/db.js" defer></script>
+<script src="assets/js/api.js" defer></script>
+<script src="assets/js/dashboard.js" defer></script>
+</body>
+</html>

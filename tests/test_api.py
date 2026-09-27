@@ -3,6 +3,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 from app.discovery import SourceStory
@@ -65,7 +67,7 @@ def test_api_refuses_invalid_workflow_transition(tmp_path):
         json={"project_id": project["id"], "title": "Bad jump", "source_url": "", "source_text": ""},
     ).json()
 
-    response = client.post(f"/api/episodes/{episode['id']}/transition", json={"status": "published"})
+    response = client.post(f"/api/episodes/{episode['id']}/transition/published")
 
     assert response.status_code == 409
 
@@ -193,7 +195,7 @@ def test_api_batch_video_upload_writes_edit_script_and_renders_no_voiceover_fina
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
     if not ffmpeg or not ffprobe:
-        return
+        pytest.skip("FFmpeg/FFprobe are required for real assembly")
     app = create_app(tmp_path / "studio.db", source_provider=_SourceProvider())
     app.state.runner.llm_provider = _EditPlanProvider()
     repo = app.state.repository
@@ -229,3 +231,116 @@ def test_api_batch_video_upload_writes_edit_script_and_renders_no_voiceover_fina
     assert revision.status_code == 200
     assert revision.json()["status"] == "assets_ready"
     assert all("video_path" not in scene for scene in revision.json()["storyboard"])
+
+
+def test_api_lists_legal_transition_targets_and_moves_via_override(tmp_path):
+    client = TestClient(create_app(tmp_path / "studio.db"))
+    project = client.post("/api/projects", json={"name": "Night Shift", "description": ""}).json()
+    episode = client.post(
+        "/api/episodes",
+        json={"project_id": project["id"], "title": "Override me", "source_url": "", "source_text": ""},
+    ).json()
+
+    listing = client.get(f"/api/episodes/{episode['id']}/transitions")
+
+    assert listing.status_code == 200
+    assert listing.json()["current"] == "discovered"
+    assert set(listing.json()["targets"]) == {"selected", "rewritten", "failed"}
+
+    moved = client.post(f"/api/episodes/{episode['id']}/transition/selected")
+    assert moved.status_code == 200
+    assert moved.json()["status"] == "selected"
+
+    refused = client.post(f"/api/episodes/{episode['id']}/transition/published")
+    assert refused.status_code == 409
+
+
+def test_api_accepts_a_single_scene_video_and_assembles_after_the_last_clip(tmp_path):
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        pytest.skip("FFmpeg/FFprobe are required for real assembly")
+    app = create_app(tmp_path / "studio.db", source_provider=_SourceProvider())
+    app.state.runner.llm_provider = _EditPlanProvider()
+    repo = app.state.repository
+    project = repo.create_project("Per-scene clips", "")
+    episode = repo.create_episode(project["id"], "Two clips", "", "Source")
+    repo.transition_episode(episode["id"], "selected")
+    repo.transition_episode(episode["id"], "rewritten")
+    repo.transition_episode(episode["id"], "awaiting_script_review")
+    repo.add_review(episode["id"], "script", "approved")
+    repo.update_episode(episode["id"], storyboard=[{"number": 1, "narration": "A door moves.", "shot": "Wide"}, {"number": 2, "narration": "The room goes still.", "shot": "Close"}])
+    repo.transition_episode(episode["id"], "storyboarded")
+    repo.transition_episode(episode["id"], "awaiting_asset_review")
+    repo.add_review(episode["id"], "assets", "approved")
+    repo.transition_episode(episode["id"], "assets_ready")
+    clips = []
+    for number, color in ((1, "black"), (2, "gray")):
+        clip = tmp_path / f"scene-{number:03d}.mp4"
+        subprocess.run([ffmpeg, "-y", "-f", "lavfi", "-i", f"color=c={color}:s=320x180:d=0.2", "-f", "lavfi", "-i", f"sine=frequency={300 + number * 100}:duration=0.2", "-shortest", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", str(clip)], check=True, capture_output=True)
+        clips.append(clip)
+    with TestClient(app) as client:
+        first = client.post(f"/api/episodes/{episode['id']}/scenes/1/video", files={"video": ("scene-001.mp4", clips[0].read_bytes(), "video/mp4")})
+        assert first.status_code == 200
+        scene_one = next(scene for scene in first.json()["storyboard"] if scene["number"] == 1)
+        assert scene_one["video_status"] == "uploaded"
+        assert first.json()["status"] == "assets_ready"
+
+        second = client.post(f"/api/episodes/{episode['id']}/scenes/2/video", files={"video": ("scene-002.mp4", clips[1].read_bytes(), "video/mp4")})
+        assert second.status_code == 200
+        completed = client.get(f"/api/episodes/{episode['id']}").json()
+        assert completed["status"] == "awaiting_final_review"
+        assert all(scene["video_status"] == "uploaded" for scene in completed["storyboard"])
+        assert Path(completed["output_path"]).is_file()
+
+
+def test_api_rejects_a_renamed_non_video_file_at_upload(tmp_path):
+    app = create_app(tmp_path / "studio.db")
+    repo = app.state.repository
+    project = repo.create_project("Probe", "")
+    episode = repo.create_episode(project["id"], "Renamed clip", "", "Source")
+    repo.transition_episode(episode["id"], "selected")
+    repo.transition_episode(episode["id"], "rewritten")
+    repo.transition_episode(episode["id"], "awaiting_script_review")
+    repo.add_review(episode["id"], "script", "approved")
+    repo.update_episode(episode["id"], storyboard=[{"number": 1, "narration": "A door.", "shot": "Wide"}])
+    repo.transition_episode(episode["id"], "storyboarded")
+    repo.transition_episode(episode["id"], "awaiting_asset_review")
+    repo.add_review(episode["id"], "assets", "approved")
+    repo.transition_episode(episode["id"], "assets_ready")
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/episodes/{episode['id']}/scenes/1/video",
+            files={"video": ("scene-001.mp4", b"this is not a video", "video/mp4")},
+        )
+
+    assert response.status_code == 422
+    assert "not a playable" in response.json()["detail"]
+
+
+def test_api_does_not_duplicate_a_background_job_when_an_upload_is_replaced(tmp_path):
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        pytest.skip("FFmpeg is required to build replacement clips")
+    app = create_app(tmp_path / "studio.db", source_provider=_SourceProvider())
+    repo = app.state.repository
+    project = repo.create_project("Idempotent", "")
+    episode = repo.create_episode(project["id"], "Replace clip", "", "Source")
+    repo.transition_episode(episode["id"], "selected")
+    repo.transition_episode(episode["id"], "rewritten")
+    repo.transition_episode(episode["id"], "awaiting_script_review")
+    repo.add_review(episode["id"], "script", "approved")
+    repo.update_episode(episode["id"], storyboard=[{"number": 1, "narration": "A door.", "shot": "Wide"}])
+    repo.transition_episode(episode["id"], "storyboarded")
+    repo.transition_episode(episode["id"], "awaiting_asset_review")
+    repo.add_review(episode["id"], "assets", "approved")
+    repo.transition_episode(episode["id"], "assets_ready")
+    repo.create_job(episode["id"], "assemble")  # an assemble job is already queued
+    clip = tmp_path / "scene-001.mp4"
+    subprocess.run([ffmpeg, "-y", "-f", "lavfi", "-i", "color=c=black:s=320x180:d=0.2", "-f", "lavfi", "-i", "sine=frequency=400:duration=0.2", "-shortest", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", str(clip)], check=True, capture_output=True)
+    with TestClient(app) as client:
+        response = client.post(f"/api/episodes/{episode['id']}/scenes/1/video", files={"video": ("scene-001.mp4", clip.read_bytes(), "video/mp4")})
+        assert response.status_code == 200
+
+    jobs = [job["kind"] for job in repo.list_jobs(episode["id"])]
+    assert jobs.count("assemble") == 1

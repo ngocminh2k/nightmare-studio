@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 
+from .audio import AudioSettings, configured_audio_provider
 from .discovery import RedditSourceProvider
 from .jobs import JobRunner
 from .media import CanvasCDPSettings, configured_media_provider
@@ -30,6 +31,7 @@ def main() -> int:
         repository,
         llm_provider=configured_llm_provider(ProviderSettings.from_environment()),
         media_provider=configured_media_provider(CanvasCDPSettings.from_environment()),
+        audio_provider=configured_audio_provider(AudioSettings.from_environment()),
     )
     service = EpisodeProductionService(repository, runner)
     if args.rebuild_package:

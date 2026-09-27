@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import csv
 import html
 import json
 from pathlib import Path
+
+from export_csv import write_image_prompt_csv
 
 from .discovery import SourceStory
 from .domain import EpisodeStatus
@@ -94,20 +95,15 @@ class EpisodeProductionService:
         episode = self._episode(episode_id)
         output_dir = self.repository.database_path.parent / "outputs" / episode_id
         output_dir.mkdir(parents=True, exist_ok=True)
-        self.repository.update_episode(episode_id, output_path=str(output_dir))
+        # output_path is the operator's pointer to the rendered artifact. A package export
+        # must never replace a finished video file with its containing directory.
+        if not str(episode.get("output_path") or "").strip():
+            self.repository.update_episode(episode_id, output_path=str(output_dir))
         episode = self._episode(episode_id)
         manifest = self.repository.episode_manifest(episode_id)
         (output_dir / "episode_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-        self._write_prompt_csv(output_dir / "image_prompts.csv", episode["storyboard"])
+        write_image_prompt_csv(output_dir / "image_prompts.csv", episode["storyboard"])
         self._write_storyboard_html(output_dir / "storyboard.html", episode)
-
-    @staticmethod
-    def _write_prompt_csv(path: Path, scenes: list[dict[str, object]]) -> None:
-        with path.open("w", newline="", encoding="utf-8") as handle:
-            writer = csv.writer(handle)
-            writer.writerow(["Scene", "Narration", "Shot", "Image Prompt", "Asset Status"])
-            for scene in scenes:
-                writer.writerow([scene.get("number"), scene.get("narration"), scene.get("shot"), scene.get("prompt"), scene.get("asset_status")])
 
     @staticmethod
     def _write_storyboard_html(path: Path, episode: dict[str, object]) -> None:

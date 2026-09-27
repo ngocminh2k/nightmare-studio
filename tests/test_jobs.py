@@ -15,6 +15,43 @@ def _record_uploaded_scene_images(repo, episode_id, tmp_path):
     repo.update_episode(episode_id, storyboard=scenes)
 
 
+class _CountingLLMProvider:
+    """A provider that records every generate() call it receives."""
+
+    def __init__(self, response: str = "reply") -> None:
+        self.calls: list[list[dict[str, str]]] = []
+        self.response = response
+
+    def generate(self, messages: list[dict[str, str]]) -> str:
+        self.calls.append(messages)
+        return self.response
+
+
+def test_storyboard_scenes_over_cap_skip_the_llm_and_use_the_deterministic_plan():
+    provider = _CountingLLMProvider()
+    script = " ".join("dread" for _ in range(2000))
+
+    scenes = build_storyboard_scenes(script, provider)
+
+    assert provider.calls == []
+    assert len(scenes) == 48
+    assert all(scene["motion_prompt"] for scene in scenes)
+
+
+def test_storyboard_scenes_within_cap_still_reach_the_llm():
+    provider = _CountingLLMProvider(
+        "| STT Scene | Starting Sentence | Scene Visual Description | Target Screen Seconds |\n"
+        "|---|---|---|---|\n"
+        "| 1 | A door opened. | A door opens in a dim corridor. | 3.0 |",
+    )
+    script = " ".join("dread" for _ in range(100))
+
+    scenes = build_storyboard_scenes(script, provider)
+
+    assert provider.calls
+    assert scenes
+
+
 def test_storyboard_director_sets_a_script_aware_max_five_second_screen_time():
     scenes = build_storyboard_scenes(" ".join("dread" for _ in range(800)))
 
@@ -295,3 +332,82 @@ class _SequencedLLMProvider:
     def generate(self, messages):
         self.messages.append(messages)
         return self.responses.pop(0)
+
+
+def _episode_at_assets_ready(tmp_path):
+    repo = StudioRepository(tmp_path / "studio.db")
+    project = repo.create_project("Victor Kane", "")
+    episode = repo.create_episode(project["id"], "The door", "", "A door opened in the dark.")
+    repo.transition_episode(episode["id"], "selected")
+    repo.transition_episode(episode["id"], "rewritten")
+    repo.transition_episode(episode["id"], "awaiting_script_review")
+    repo.add_review(episode["id"], "script", "approved")
+    repo.update_episode(episode["id"], script_final="A door opened. A train waited.", storyboard=[{"number": 1, "narration": "A door opened.", "shot": "Wide", "target_duration_seconds": 2.5}])
+    repo.transition_episode(episode["id"], "storyboarded")
+    repo.transition_episode(episode["id"], "awaiting_asset_review")
+    repo.add_review(episode["id"], "assets", "approved")
+    repo.transition_episode(episode["id"], "assets_ready")
+    clip = tmp_path / "scene-001.mp4"
+    clip.write_bytes(b"ftypmp42fakeclip")
+    scenes = repo.get_episode(episode["id"])["storyboard"]
+    scenes[0]["video_path"] = str(clip)
+    repo.update_episode(episode["id"], storyboard=scenes)
+    return repo, episode["id"]
+
+
+class _FakeCompleted:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def test_assemble_job_renders_edl_and_reports_the_real_clip_count(tmp_path, monkeypatch):
+    import app.jobs as jobs_module
+
+    repo, episode_id = _episode_at_assets_ready(tmp_path)
+    edl = '{"edl":[{"scene_number":1,"start_seconds":0,"end_seconds":2,"playback_rate":1,"transition":"cut"}]}'
+    runner = JobRunner(repo, llm_provider=_RecordingLLMProvider(edl))
+
+    def fake_run(command, **_kwargs):
+        Path(command[-1]).write_bytes(b"final-video")
+        return _FakeCompleted()
+
+    monkeypatch.setattr(jobs_module, "clip_duration_seconds", lambda clip: 6.0)
+    monkeypatch.setattr(jobs_module, "clip_has_audio", lambda clip: True)
+    monkeypatch.setattr(jobs_module.shutil, "which", lambda name: "ffmpeg" if name == "ffmpeg" else None)
+    monkeypatch.setattr(jobs_module.subprocess, "run", fake_run)
+
+    completed = runner.run(runner.enqueue(episode_id, "assemble")["id"])
+
+    assert completed["status"] == "completed"
+    assert completed["result"]["clip_count"] == 1
+    assert Path(completed["result"]["final_video"]).is_file()
+    assert repo.get_episode(episode_id)["status"] == "awaiting_final_review"
+    assert (tmp_path / "outputs" / episode_id / "edit_decision_list.json").is_file()
+
+
+def test_assemble_job_fails_when_ffmpeg_is_missing(tmp_path, monkeypatch):
+    import app.jobs as jobs_module
+
+    repo, episode_id = _episode_at_assets_ready(tmp_path)
+    monkeypatch.setattr(jobs_module, "clip_duration_seconds", lambda clip: 6.0)
+    monkeypatch.setattr(jobs_module.shutil, "which", lambda name: None)
+    runner = JobRunner(repo, llm_provider=_RecordingLLMProvider('{"edl":[{"scene_number":1,"start_seconds":0,"end_seconds":2,"playback_rate":1,"transition":"cut"}]}'))
+
+    failed = runner.run(runner.enqueue(episode_id, "assemble")["id"])
+
+    assert failed["status"] == "failed"
+    assert "FFmpeg is required" in failed["error"]
+
+
+def test_assemble_job_rejects_an_edl_over_the_directed_duration(tmp_path, monkeypatch):
+    import app.jobs as jobs_module
+
+    repo, episode_id = _episode_at_assets_ready(tmp_path)
+    over_budget = '{"edl":[{"scene_number":1,"start_seconds":0,"end_seconds":4,"playback_rate":1,"transition":"cut"}]}'
+    monkeypatch.setattr(jobs_module, "clip_duration_seconds", lambda clip: 6.0)
+    runner = JobRunner(repo, llm_provider=_RecordingLLMProvider(over_budget))
+
+    failed = runner.run(runner.enqueue(episode_id, "assemble")["id"])
+
+    assert failed["status"] == "failed"
+    assert "target duration" in failed["error"]

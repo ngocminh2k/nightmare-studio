@@ -23,6 +23,7 @@ test-results/
 
 # Application Data & Outputs
 outputs/
+data/
 data/outputs/
 data/canvas-cdp-profile/
 *.db
