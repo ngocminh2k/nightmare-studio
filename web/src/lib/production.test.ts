@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { apiPath, isLocalArtifact, nextOperation, statusLabel, visibleEpisodes } from "./production";
+import { apiPath, episodeFlow, flowIndex, isLocalArtifact, nextOperation, stateTransitions, statusLabel, visibleEpisodes } from "./production";
 
 describe("production desk workflow", () => {
   it("uses the same-origin API proxy instead of calling a separate UI backend", () => {
@@ -36,5 +36,16 @@ describe("production desk workflow", () => {
     expect(isLocalArtifact("mock://scene.png")).toBe(false);
     expect(isLocalArtifact(undefined)).toBe(false);
     expect(statusLabel("awaiting_final_review")).toBe("awaiting final review");
+  });
+
+  it("mirrors the backend transition table and flags the review gates in the stepper", () => {
+    expect(flowIndex("script_approved")).toBe(episodeFlow.indexOf("script_approved"));
+    expect(flowIndex("published")).toBe(episodeFlow.length - 1);
+    expect(stateTransitions("awaiting_asset_review")).toEqual(expect.arrayContaining(["assets_approved"]));
+    expect(stateTransitions("video_ready")).toEqual(expect.arrayContaining(["assets_ready", "awaiting_final_review"]));
+    expect(stateTransitions("published")).toEqual([]);
+    expect(stateTransitions("failed")).toEqual(["selected", "rewritten", "storyboarded"]);
+    expect(stateTransitions("awaiting_final_review")).toEqual(expect.arrayContaining(["final_approved", "assets_ready"]));
+    expect(stateTransitions("unknown_state")).toEqual([]);
   });
 });

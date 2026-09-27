@@ -9,9 +9,10 @@ from typing import Any
 
 from export_csv import write_image_prompt_csv
 
+from .audio import AudioProvider, configured_audio_provider
 from .domain import EpisodeStatus
 from .media import DeterministicMediaProvider, MediaProvider, build_motion_prompt, build_victor_kane_image_prompt
-from .nanobanana_prompt_rules import NANOBANANA_IMAGE_RULES
+from .nanobanana_prompt_rules import NANOBANANA_IMAGE_RULES, NANOBANANA_NEGATIVE_PROMPT
 from .providers import DeterministicLLMProvider, LLMProvider
 from .repository import StudioRepository
 from .systemone import (
@@ -20,6 +21,56 @@ from .systemone import (
     classify_shot_type,
     decide_scene_transition,
 )
+
+BEAT_EXTRACTION_INSTRUCTION = (
+    "Compress this horror story chunk into tension beats. Return one pipe-delimited line per beat: "
+    "| beat | characters | core_event (5-15 words) | emotion |. Cover the chunk completely. No commentary."
+)
+SOURCE_BEAT_CHUNK_CHARS = 4000
+
+# The two-phase LLM storyboard flow issues one completion per script. A full-length draft
+# (~5,000 words) already exceeds a router model's reliable table-output window; cap the
+# LLM path at a length that finishes in a reasonable latency and fall back beyond it.
+STORYBOARD_LLM_MAX_SCRIPT_CHARS = 8000
+
+
+def extract_source_beats(source: str, llm_provider: LLMProvider, chunk_chars: int = SOURCE_BEAT_CHUNK_CHARS) -> str:
+    """Port of Toonflow's chapter event extraction: long sources become tension beats instead of being silently truncated."""
+
+    if len(source) <= chunk_chars:
+        return source
+    beats: list[str] = []
+    start = 0
+    while start < len(source):
+        end = start + chunk_chars
+        if end < len(source):
+            # Prefer a paragraph/line boundary so a beat never starts mid-sentence.
+            boundary = max(source.rfind("\n\n", start, end), source.rfind("\n", start, end), source.rfind(" ", start, end))
+            if boundary > start:
+                end = boundary
+        chunk = source[start:end].strip()
+        start = end
+        if not chunk:
+            continue
+        response = llm_provider.generate(
+            [{"role": "system", "content": BEAT_EXTRACTION_INSTRUCTION}, {"role": "user", "content": chunk}]
+        ).strip()
+        beats.append(response or chunk)
+    return "\n".join(beats)
+
+
+def supervise_draft(draft: str, llm_provider: LLMProvider) -> str:
+    """Port of Toonflow's supervision layer: a QA pass whose notes inform, but never replace, the human gate."""
+
+    if isinstance(llm_provider, DeterministicLLMProvider) or not draft.strip():
+        return ""
+    notes = llm_provider.generate(
+        [
+            {"role": "system", "content": "You are the horror desk supervisor. Review the narration draft for voice consistency, slow-burn pacing, and plot continuity. Return at most 5 short bullet notes in English; never rewrite the draft."},
+            {"role": "user", "content": draft[:8000]},
+        ]
+    ).strip()
+    return notes[:1200]
 
 
 def build_legacy_narrative_prompt(*, title: str, source: str, editorial_direction: str) -> str:
@@ -47,14 +98,15 @@ def build_legacy_narrative_prompt(*, title: str, source: str, editorial_directio
         "evidence; never treat them as a checklist. Avoid cheap jump scares, generic ghost-story phrasing, moral lessons, "
         "or commentary about the writing.\n\n"
         f"Editorial direction: {editorial_direction}\n"
-        f"Original story ({title}):\n{source[:4000]}"
+        f"Original story ({title}):\n{source}"
     )
 
 
 def parse_edit_decision_list(response: str, scene_durations: dict[int, float]) -> list[dict[str, Any]]:
     """Validate the LLM's machine-readable edit plan before it reaches FFmpeg."""
 
-    cleaned = response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    match = re.search(r"\{.*\}", response, re.DOTALL)
+    cleaned = match.group(0) if match else response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
     try:
         items = json.loads(cleaned)["edl"]
         plan = [
@@ -75,6 +127,13 @@ def parse_edit_decision_list(response: str, scene_durations: dict[int, float]) -
     if any(item["transition"] != "cut" or not 0 <= item["start_seconds"] < item["end_seconds"] <= scene_durations[item["scene_number"]] or not 0.5 <= item["playback_rate"] <= 1.7 for item in plan):
         raise ValueError("Edit decision list may use cut transitions, valid source trims, and 0.5x-1.7x playback")
     return plan
+
+
+_EDL_EPSILON = 1e-6  # Absorbs IEEE 754 noise so a 2.5000000000000004s cut is not rejected.
+
+
+def rendered_seconds(item: dict[str, Any]) -> float:
+    return (item["end_seconds"] - item["start_seconds"]) / item["playback_rate"]
 
 
 def edit_script_markdown(plan: list[dict[str, Any]]) -> str:
@@ -160,6 +219,19 @@ def clip_duration_seconds(clip: Path) -> float:
     return duration
 
 
+def build_assemble_filters(plan: list[dict[str, Any]], has_audio_list: list[bool]) -> list[str]:
+    """Build FFmpeg complex filter expressions with unified stereo 48kHz audio formatting."""
+    filters: list[str] = []
+    for index, item in enumerate(plan):
+        start, end, rate = item["start_seconds"], item["end_seconds"], item["playback_rate"]
+        filters.append(f"[{index}:v]trim=start={start}:end={end},setpts=PTS-STARTPTS,setpts=PTS/{rate}[v{index}]")
+        if has_audio_list[index]:
+            filters.append(f"[{index}:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,atempo={rate},aformat=sample_rates=48000:channel_layouts=stereo[a{index}]")
+        else:
+            filters.append(f"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={(end - start) / rate},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[a{index}]")
+    return filters
+
+
 class JobRunner:
     """Deterministic local jobs. Provider adapters can replace these handlers later."""
 
@@ -170,11 +242,13 @@ class JobRunner:
         repository: StudioRepository,
         llm_provider: LLMProvider | None = None,
         media_provider: MediaProvider | None = None,
+        audio_provider: AudioProvider | None = None,
         systemone_client: SystemOneClient | None = None,
     ):
         self.repository = repository
         self.llm_provider = llm_provider or DeterministicLLMProvider()
         self.media_provider = media_provider or DeterministicMediaProvider()
+        self.audio_provider = audio_provider or configured_audio_provider()
         self.systemone_client = systemone_client
 
     def enqueue(self, episode_id: str, kind: str) -> dict[str, Any]:
@@ -217,6 +291,9 @@ class JobRunner:
         brand_bible = (project or {}).get("brand_bible", "").strip()
         self.repository.update_job(job["id"], progress=35)
         title = episode["title"].strip() or "Untitled Incident"
+        if len(source) > SOURCE_BEAT_CHUNK_CHARS:
+            source = extract_source_beats(source, self.llm_provider)
+            self.repository.add_activity(episode["id"], "rewrite", "Compressed the long source into tension beats before rewriting")
         prompt = build_legacy_narrative_prompt(
             title=title,
             source=source,
@@ -226,6 +303,9 @@ class JobRunner:
         if episode["status"] != EpisodeStatus.REWRITTEN.value:
             self.repository.transition_episode(episode["id"], EpisodeStatus.REWRITTEN, note="Rewrite draft generated")
         updated = self.repository.update_episode(episode["id"], script_draft=draft, cost_total=float(episode["cost_total"]) + 0.02)
+        notes = supervise_draft(draft, self.llm_provider)
+        if notes:
+            self.repository.add_activity(episode["id"], "review", f"Supervisor QA notes: {notes}")
         self.repository.transition_episode(episode["id"], EpisodeStatus.AWAITING_SCRIPT_REVIEW, note="Draft ready for script review")
         self.repository.update_job(job["id"], progress=85)
         return {"episode_id": episode["id"], "characters": len(draft), "status": updated["status"] if updated else ""}
@@ -279,7 +359,11 @@ class JobRunner:
         """Create one editorial script, then render the user-supplied clips with FFmpeg and no audio."""
 
         episode = self._episode(job)
-        if episode["status"] != EpisodeStatus.ASSETS_READY.value:
+        if episode["status"] not in {
+            EpisodeStatus.ASSETS_READY.value,
+            EpisodeStatus.VIDEO_READY.value,
+            EpisodeStatus.AWAITING_FINAL_REVIEW.value,
+        }:
             raise ValueError("Final assembly requires ready scene images and their Veo prompt plan")
         scenes = episode["storyboard"]
         clips_by_scene = {int(scene["number"]): Path(str(scene.get("video_path") or "")) for scene in scenes}
@@ -289,7 +373,7 @@ class JobRunner:
         target_durations = {int(scene["number"]): float(scene.get("target_duration_seconds") or 5) for scene in scenes}
         edit_request = "Execute the pre-directed pacing plan. Return JSON only: {\"edl\":[{\"scene_number\":1,\"start_seconds\":0,\"end_seconds\":4.25,\"playback_rate\":0.85,\"transition\":\"cut\"}]}. Include every scene exactly once; only use cut transitions; playback_rate must be 0.5 to 1.7; never exceed the source duration; and rendered duration (end-start)/playback_rate must not exceed target_duration_seconds, which is always at most 5 seconds.\n\n" + json.dumps([{"scene_number": scene["number"], "source_duration_seconds": source_durations[int(scene["number"])], "target_duration_seconds": target_durations[int(scene["number"])], "narration": scene.get("narration"), "shot": scene.get("shot")} for scene in scenes], ensure_ascii=False)
         plan = parse_edit_decision_list(self.llm_provider.generate([{"role": "user", "content": edit_request}]), source_durations)
-        if any((item["end_seconds"] - item["start_seconds"]) / item["playback_rate"] > target_durations[item["scene_number"]] for item in plan):
+        if any(rendered_seconds(item) > target_durations[item["scene_number"]] + _EDL_EPSILON for item in plan):
             raise ValueError("Edit decision list exceeds a scene's pre-directed target duration")
         output_dir = self.repository.database_path.parent / "outputs" / episode["id"]
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -300,31 +384,79 @@ class JobRunner:
             raise RuntimeError("FFmpeg is required for final assembly but was not found on PATH")
         final_video = output_dir / "final_no_voiceover.mp4"
         inputs = [clips_by_scene[item["scene_number"]] for item in plan]
-        filters: list[str] = []
-        for index, item in enumerate(plan):
-            start, end, rate = item["start_seconds"], item["end_seconds"], item["playback_rate"]
-            filters.append(f"[{index}:v]trim=start={start}:end={end},setpts=PTS-STARTPTS,setpts=PTS/{rate}[v{index}]")
-            if clip_has_audio(inputs[index]):
-                filters.append(f"[{index}:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,atempo={rate}[a{index}]")
-            else:
-                filters.append(f"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={(end - start) / rate},asetpts=PTS-STARTPTS[a{index}]")
+        filters = build_assemble_filters(plan, [clip_has_audio(clip) for clip in inputs])
         filters.append("".join(f"[v{index}][a{index}]" for index in range(len(plan))) + f"concat=n={len(plan)}:v=1:a=1[edited_video][edited_audio]")
         command = [ffmpeg, "-y"] + [argument for clip in inputs for argument in ("-i", str(clip))] + ["-filter_complex", ";".join(filters), "-map", "[edited_video]", "-map", "[edited_audio]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final_video)]
         completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
         if completed.returncode != 0 or not final_video.is_file():
             raise RuntimeError(f"FFmpeg assembly failed: {completed.stderr[-1000:]}")
         self.repository.update_episode(episode["id"], output_path=str(final_video))
-        self.repository.transition_episode(episode["id"], EpisodeStatus.VIDEO_READY, note="Rendered user-uploaded clips with FFmpeg; original clip audio preserved")
-        self.repository.transition_episode(episode["id"], EpisodeStatus.AWAITING_FINAL_REVIEW, note="Final video with original clip audio and edit script ready")
-        return {"final_video": str(final_video), "edit_script": str(output_dir / "edit_script.md"), "clip_count": len(inputs)}
+        if episode["status"] != EpisodeStatus.AWAITING_FINAL_REVIEW.value:
+            self.repository.transition_episode(episode["id"], EpisodeStatus.VIDEO_READY, note="Rendered user-uploaded clips with FFmpeg; original clip audio preserved")
+            self.repository.transition_episode(episode["id"], EpisodeStatus.AWAITING_FINAL_REVIEW, note="Final video with original clip audio and edit script ready")
+        return {"final_video": str(final_video), "edit_script": str(output_dir / "edit_script.md"), "clip_count": len(plan)}
 
     def _run_audio(self, job: dict[str, Any]) -> dict[str, Any]:
         episode = self._episode(job)
-        if episode["status"] != EpisodeStatus.ASSETS_READY.value:
-            raise ValueError("Audio rendering requires ready assets")
-        self.repository.update_episode(episode["id"], output_path=f"outputs/{episode['id']}")
-        self.repository.transition_episode(episode["id"], EpisodeStatus.AUDIO_READY, note="Narration timing package generated")
-        return {"audio_manifest": f"outputs/{episode['id']}/audio_manifest.json", "provider": "mock"}
+        if episode["status"] not in {EpisodeStatus.ASSETS_READY.value, EpisodeStatus.ASSETS_APPROVED.value}:
+            raise ValueError("Audio rendering requires ready or approved assets")
+
+        scenes = episode.get("storyboard") or []
+        output_dir = self.repository.database_path.parent / "outputs" / episode["id"]
+        audio_dir = output_dir / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+
+        clips: list[dict[str, Any]] = []
+        total_duration = 0.0
+
+        for scene in scenes:
+            narration = str(scene.get("narration") or "").strip()
+            num = int(scene["number"])
+            audio_file = audio_dir / f"scene-{num:03d}.mp3"
+
+            if narration:
+                voice = str(scene.get("voice") or getattr(getattr(self.audio_provider, "settings", None), "default_voice", "mrkane"))
+                self.audio_provider.generate_speech(narration, audio_file, voice=voice)
+                try:
+                    dur = clip_duration_seconds(audio_file)
+                except Exception:
+                    # Fallback for mock/fixture runs where dummy bytes have no audio stream
+                    dur = max(1.0, round(len(narration.split()) / 2.5, 2))
+            else:
+                dur = 0.0
+
+            scene["audio_path"] = str(audio_file)
+            scene["audio_duration_seconds"] = dur
+            total_duration += dur
+            clips.append({
+                "scene_number": num,
+                "path": str(audio_file),
+                "duration_seconds": dur,
+                "narration": narration,
+            })
+
+        self.repository.update_episode(episode["id"], storyboard=scenes, output_path=f"outputs/{episode['id']}")
+
+        manifest_path = output_dir / "audio_manifest.json"
+        manifest_data = {
+            "episode_id": episode["id"],
+            "provider": getattr(self.audio_provider, "name", "custom"),
+            "clips": clips,
+            "total_duration_seconds": total_duration,
+        }
+        manifest_path.write_text(json.dumps(manifest_data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        self.repository.transition_episode(
+            episode["id"],
+            EpisodeStatus.AUDIO_READY,
+            note=f"Voiceover generated for {len(clips)} scene(s) via {getattr(self.audio_provider, 'name', 'audio provider')}",
+        )
+        return {
+            "audio_manifest": str(manifest_path),
+            "clip_count": len(clips),
+            "total_duration_seconds": total_duration,
+            "provider": getattr(self.audio_provider, "name", "custom"),
+        }
 
     def _run_video(self, job: dict[str, Any]) -> dict[str, Any]:
         episode = self._episode(job)
@@ -338,7 +470,10 @@ class JobRunner:
                 raise ValueError(f"Scene {scene['number']} has no local generated image")
             motion_prompt = str(scene.get("motion_prompt") or build_motion_prompt(scene))
             video_path = self._artifact_path(episode["id"], "clips", scene["number"], ".mp4")
-            generated = self.media_provider.generate_video(image_path, motion_prompt, video_path)
+            if video_path.is_file() and video_path.stat().st_size > 0:
+                generated = video_path
+            else:
+                generated = self.media_provider.generate_video(image_path, motion_prompt, video_path)
             scene["motion_prompt"] = motion_prompt
             scene["video_path"] = str(generated)
             clips.append({"scene_number": scene["number"], "path": str(generated), "motion_prompt": motion_prompt})
@@ -358,7 +493,7 @@ class JobRunner:
         }
 
     def _artifact_path(self, episode_id: str, asset_kind: str, number: int, suffix: str) -> Path:
-        return self.repository.database_path.parent / "outputs" / episode_id / asset_kind / f"scene-{number:02d}{suffix}"
+        return self.repository.database_path.parent / "outputs" / episode_id / asset_kind / f"scene-{number:03d}{suffix}"
 
     def _run_publish(self, job: dict[str, Any]) -> dict[str, Any]:
         episode = self._episode(job)
@@ -389,12 +524,21 @@ def _fallback_storyboard_scenes(script: str, client: SystemOneClient | None = No
     for index in range(scene_count):
         start = index * len(words) // scene_count
         end = (index + 1) * len(words) // scene_count
-        narration = " ".join(words[start:end])
+        chunk_text = " ".join(words[start:end])
+        sentences = re.split(r"(?<=[.!?])\s+", chunk_text)
+        lead = sentences[0].strip() if sentences else chunk_text
+        lead_words = lead.split()
+        if len(lead_words) > 22:
+            lead = " ".join(lead_words[:20]) + "..."
+        narration = lead or chunk_text
+        shot = "Medium close-up" if index % 2 == 0 else "Wide establishing shot"
         scene = {
             "number": index + 1,
             "narration": narration,
-            "shot": "Medium close-up" if index % 2 == 0 else "Wide establishing shot",
-            "prompt": build_victor_kane_image_prompt({"shot": "Medium close-up" if index % 2 == 0 else "Wide establishing shot", "narration": narration}),
+            "story_beat": chunk_text,
+            "shot": shot,
+            "prompt": build_victor_kane_image_prompt({"shot": shot, "narration": narration, "story_beat": chunk_text}),
+            "negative_prompt": NANOBANANA_NEGATIVE_PROMPT,
             "asset_status": "pending",
         }
         scene["motion_prompt"] = build_motion_prompt(scene)
@@ -409,6 +553,12 @@ def build_storyboard_scenes(
 ) -> list[dict[str, Any]]:
     """Use the configured legacy scene-table and 1:1 image-prompt stages when an LLM is available."""
     if not script.strip() or not llm_provider or isinstance(llm_provider, DeterministicLLMProvider):
+        return _fallback_storyboard_scenes(script, client=client)
+    if len(script) > STORYBOARD_LLM_MAX_SCRIPT_CHARS:
+        # The legacy draft is ~5,000 words. Asking a router model to emit a 100+-row scene
+        # table in one completion stalls on output tokens; use the deterministic 48-shot plan
+        # instead so production never hangs on a single oversized prompt.
+        # ponytail: feed the script to the scene splitter in beat-sized chunks and renumber.
         return _fallback_storyboard_scenes(script, client=client)
     scene_instruction = (
         "You are a professional storyboard director. Split the literary script into visual scenes of 250-350 characters. "
@@ -439,5 +589,8 @@ def build_storyboard_scenes(
             scene["motion_prompt"] = build_motion_prompt(scene)
             scenes.append(scene)
         return apply_director_pacing(scenes, script, client=client)
-    except (ValueError, IndexError):
+    except (ValueError, IndexError, RuntimeError):
+        # A provider outage (RuntimeError from RouterLLMProvider.generate) or malformed
+        # LLM output must not hard-fail the storyboard job: fall back to the deterministic
+        # 48-shot plan so the editorial pipeline keeps moving.
         return _fallback_storyboard_scenes(script, client=client)

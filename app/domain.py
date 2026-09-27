@@ -25,13 +25,13 @@ _TRANSITIONS: dict[EpisodeStatus, set[EpisodeStatus]] = {
     EpisodeStatus.DISCOVERED: {EpisodeStatus.SELECTED, EpisodeStatus.REWRITTEN, EpisodeStatus.FAILED},
     EpisodeStatus.SELECTED: {EpisodeStatus.REWRITTEN, EpisodeStatus.FAILED},
     EpisodeStatus.REWRITTEN: {EpisodeStatus.AWAITING_SCRIPT_REVIEW, EpisodeStatus.FAILED},
-    EpisodeStatus.AWAITING_SCRIPT_REVIEW: {EpisodeStatus.SCRIPT_APPROVED, EpisodeStatus.FAILED},
+    EpisodeStatus.AWAITING_SCRIPT_REVIEW: {EpisodeStatus.SCRIPT_APPROVED, EpisodeStatus.REWRITTEN, EpisodeStatus.FAILED},
     EpisodeStatus.SCRIPT_APPROVED: {EpisodeStatus.STORYBOARDED, EpisodeStatus.FAILED},
     EpisodeStatus.STORYBOARDED: {EpisodeStatus.AWAITING_ASSET_REVIEW, EpisodeStatus.FAILED},
-    EpisodeStatus.AWAITING_ASSET_REVIEW: {EpisodeStatus.ASSETS_APPROVED, EpisodeStatus.FAILED},
-    EpisodeStatus.ASSETS_APPROVED: {EpisodeStatus.ASSETS_READY, EpisodeStatus.FAILED},
+    EpisodeStatus.AWAITING_ASSET_REVIEW: {EpisodeStatus.ASSETS_APPROVED, EpisodeStatus.STORYBOARDED, EpisodeStatus.FAILED},
+    EpisodeStatus.ASSETS_APPROVED: {EpisodeStatus.ASSETS_READY, EpisodeStatus.AUDIO_READY, EpisodeStatus.FAILED},
     EpisodeStatus.ASSETS_READY: {EpisodeStatus.AUDIO_READY, EpisodeStatus.VIDEO_READY, EpisodeStatus.FAILED},
-    EpisodeStatus.AUDIO_READY: {EpisodeStatus.VIDEO_READY, EpisodeStatus.FAILED},
+    EpisodeStatus.AUDIO_READY: {EpisodeStatus.ASSETS_READY, EpisodeStatus.ASSETS_APPROVED, EpisodeStatus.VIDEO_READY, EpisodeStatus.FAILED},
     EpisodeStatus.VIDEO_READY: {EpisodeStatus.ASSETS_READY, EpisodeStatus.AWAITING_FINAL_REVIEW, EpisodeStatus.FAILED},
     EpisodeStatus.AWAITING_FINAL_REVIEW: {EpisodeStatus.ASSETS_READY, EpisodeStatus.FINAL_APPROVED, EpisodeStatus.FAILED},
     EpisodeStatus.FINAL_APPROVED: {EpisodeStatus.PUBLISHED, EpisodeStatus.FAILED},
@@ -51,11 +51,31 @@ _APPROVED_GATES = {
     "final": EpisodeStatus.FINAL_APPROVED,
 }
 
+# Where a gate sends work back to when the operator requests changes. Each target is the
+# last status that can still edit the artifact under review, and every one is a legal
+# transition out of the corresponding awaiting_* status.
+_REJECTED_GATES = {
+    "script": EpisodeStatus.REWRITTEN,
+    "assets": EpisodeStatus.STORYBOARDED,
+    "final": EpisodeStatus.ASSETS_READY,
+}
+
 
 def can_transition(current: EpisodeStatus | str, target: EpisodeStatus | str) -> bool:
     current_status = EpisodeStatus(current)
     target_status = EpisodeStatus(target)
     return target_status in _TRANSITIONS[current_status]
+
+
+def transitions(current: EpisodeStatus | str) -> list[str]:
+    """Legal manual override targets for an operator who needs to unblock work."""
+    current_status = EpisodeStatus(current)
+    return [status.value for status in sorted(_TRANSITIONS[current_status], key=lambda item: item.value)]
+
+
+def review_gate_status(gate: str) -> EpisodeStatus | None:
+    """The awaiting_* status a gate reviews, or None for record-only gates."""
+    return _REVIEW_GATES.get(gate)
 
 
 def next_review_status(gate: str) -> EpisodeStatus:
@@ -68,6 +88,13 @@ def next_review_status(gate: str) -> EpisodeStatus:
 def approved_status(gate: str) -> EpisodeStatus:
     try:
         return _APPROVED_GATES[gate]
+    except KeyError as exc:
+        raise ValueError(f"Unknown review gate: {gate}") from exc
+
+
+def rejected_status(gate: str) -> EpisodeStatus:
+    try:
+        return _REJECTED_GATES[gate]
     except KeyError as exc:
         raise ValueError(f"Unknown review gate: {gate}") from exc
 

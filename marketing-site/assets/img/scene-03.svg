@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 270" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Hành lang dài · bước chân gần hơn">
+  <defs>
+    <linearGradient id="corr3" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#1a0a14"/>
+      <stop offset="1" stop-color="#06020a"/>
+    </linearGradient>
+    <radialGradient id="lamp3" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#dc143c" stop-opacity=".55"/>
+      <stop offset="1" stop-color="#dc143c" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur3"><feGaussianBlur stdDeviation="2"/></filter>
+  </defs>
+  <rect width="480" height="270" fill="#0a0408"/>
+  <!-- Corridor walls converging -->
+  <polygon points="0,0 180,0 240,135 240,135 240,135 180,270 0,270" fill="url(#corr3)"/>
+  <polygon points="480,0 300,0 240,135 300,270 480,270" fill="url(#corr3)"/>
+  <!-- Floor -->
+  <polygon points="180,135 300,135 480,270 0,270" fill="#0a0308"/>
+  <polygon points="220,135 260,135 320,270 160,270" fill="#160810" opacity=".7"/>
+  <!-- Lamp -->
+  <circle cx="240" cy="80" r="30" fill="url(#lamp3)"/>
+  <circle cx="240" cy="80" r="6" fill="#f5e8c8" opacity=".9"/>
+  <circle cx="240" cy="80" r="2" fill="#dc143c"/>
+  <!-- Picture frames on walls -->
+  <rect x="40" y="60" width="30" height="40" fill="#0a0408" stroke="#3a1622"/>
+  <rect x="60" y="100" width="20" height="30" fill="#0a0408" stroke="#3a1622"/>
+  <rect x="400" y="60" width="30" height="40" fill="#0a0408" stroke="#3a1622"/>
+  <rect x="390" y="100" width="20" height="30" fill="#0a0408" stroke="#3a1622"/>
+  <!-- Distant figure silhouette -->
+  <g transform="translate(228 150)" opacity=".55">
+    <ellipse cx="12" cy="10" rx="8" ry="10" fill="#000"/>
+    <rect x="4" y="20" width="16" height="34" rx="3" fill="#000"/>
+    <rect x="2" y="36" width="6" height="28" fill="#000"/>
+    <rect x="16" y="36" width="6" height="28" fill="#000"/>
+  </g>
+  <!-- Mist -->
+  <ellipse cx="240" cy="200" rx="180" ry="25" fill="#dc143c" opacity=".06" filter="url(#blur3)"/>
+  <defs>
+    <radialGradient id="vig3" cx=".5" cy=".5" r=".8">
+      <stop offset=".5" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity=".8"/>
+    </radialGradient>
+  </defs>
+  <rect width="480" height="270" fill="url(#vig3)"/>
+</svg>

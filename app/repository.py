@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from .domain import EpisodeStatus, approved_status, can_transition
+from .domain import EpisodeStatus, approved_status, can_transition, rejected_status, review_gate_status
 
 
 def utc_now() -> str:
@@ -234,11 +234,14 @@ class StudioRepository:
                 "INSERT INTO reviews(id, episode_id, gate, decision, note, created_at) VALUES (?, ?, ?, ?, ?, ?)",
                 (review_id, episode_id, gate, decision, note, utc_now()),
             )
+        # A review decision must move the episode, or the operator is stranded at the gate:
+        # approving advances, requesting changes sends the work back to be redone. Gates
+        # outside the workflow (e.g. "source") are records only and move nothing.
+        resolve, verb = {"approved": (approved_status, "approved"), "changes_requested": (rejected_status, "changes requested")}[decision]
+        expected = review_gate_status(gate)
         episode = self.get_episode(episode_id)
-        if episode and decision == "approved":
-            expected = {"script": EpisodeStatus.AWAITING_SCRIPT_REVIEW, "assets": EpisodeStatus.AWAITING_ASSET_REVIEW, "final": EpisodeStatus.AWAITING_FINAL_REVIEW}.get(gate)
-            if expected and episode["status"] == expected.value:
-                self.transition_episode(episode_id, approved_status(gate), note=f"{gate.title()} review approved")
+        if episode and expected and episode["status"] == expected.value:
+            self.transition_episode(episode_id, resolve(gate), note=f"{gate.title()} review {verb}")
         with self._connection() as conn:
             return self._row(conn.execute("SELECT * FROM reviews WHERE id = ?", (review_id,)).fetchone())  # type: ignore[return-value]
 
