@@ -844,10 +844,23 @@ const isFlowSettingsOpen = async (page: any): Promise<boolean> => {
   });
 };
 
+const flowSettingsPresent = async (page: any): Promise<boolean> => {
+  return page.evaluate(() => Boolean(document.querySelector('flow-prompt-box-settings')));
+};
+
 const openFlowSettings = async (page: any) => {
   const deadline = Date.now() + FLOW_PROMPT_WAIT_MS;
+  let clicked = false;
   while (Date.now() < deadline) {
     if (await isFlowSettingsOpen(page)) return;
+    // The settings panel is rendered as soon as the trigger is clicked but stays
+    // zero-sized for a while on slower accounts. Re-clicking the trigger while it
+    // is still animating toggles the panel shut again, so the panel's mere presence
+    // in the DOM means "wait", not "click again".
+    if (clicked && (await flowSettingsPresent(page))) {
+      await wait(400);
+      continue;
+    }
     const trigger = page.locator('.settings-trigger-button, button:has(.settings-summary), [aria-label="Điều kiện kích hoạt cài đặt"]').first();
     if ((await trigger.count()) && (await trigger.isVisible().catch(() => false))) {
       const box = await trigger.boundingBox().catch(() => null);
@@ -856,7 +869,8 @@ const openFlowSettings = async (page: any) => {
       } else {
         await trigger.click({ force: true }).catch(() => {});
       }
-      await wait(600);
+      clicked = true;
+      await wait(1200);
       if (await isFlowSettingsOpen(page)) return;
     }
     const buttons = page.locator('button[aria-expanded]');
@@ -1003,6 +1017,28 @@ const configureFlowControls = async (page: any, job: FlowJob) => {
         await settleFlowUi();
       }
     }
+  }
+};
+
+// Flow opens in one of two composer states depending on the account/session:
+//   - a session side panel ("Phiên không có tiêu đề") replaces the media composer
+//     entirely, so `flow-prompt-box` does not exist and the settings trigger
+//     cannot be reached;
+//   - the composer is in "Tác nhân" (agent) mode, which renders a chat-style
+//     composer and hides the model / aspect-ratio settings trigger.
+// Both states make `openFlowSettings` throw "Flow settings summary was not found".
+const ensureMediaComposerReady = async (page: any) => {
+  if (!(await page.locator('flow-prompt-box').count())) {
+    const closePanel = page.locator('button[aria-label="close" i], button[aria-label*="Đóng" i]').first();
+    if (await closePanel.count()) {
+      await closePanel.click({ force: true }).catch(() => {});
+      await settleFlowUi();
+    }
+  }
+  const agentChip = page.locator('flow-prompt-box .agent-mode-chip-checked').first();
+  if (await agentChip.count()) {
+    await agentChip.click({ force: true }).catch(() => {});
+    await settleFlowUi();
   }
 };
 
@@ -1661,6 +1697,7 @@ export const runGoogleFlowJob = createExclusiveQueue(async (options: FlowRunOpti
 
     // 3. Reset composer
     log('clearing composer state...');
+    await ensureMediaComposerReady(page);
     await clearFlowComposer(page);
 
     // 4. Enter prompt text

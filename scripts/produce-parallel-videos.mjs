@@ -26,13 +26,27 @@ const EPISODE_ID = process.env.NIGHTMARE_EPISODE_ID || '812b393b-d263-4670-a144-
 const CDP_URL = process.env.NIGHTMARE_CANVAS_CDP_URL || 'http://127.0.0.1:9222';
 const DB_PATH = process.env.NIGHTMARE_DB_PATH || 'data/studio.db';
 
-// 3 independent Flow project URLs — each worker operates on its own project
-// to avoid DOM/canvas collisions.
-const FLOW_PROJECT_URLS = [
-  process.env.FLOW_PROJECT_1 || 'https://flow.google.com/project/0e935f47-3f1e-4546-9972-431b328de86f',
-  process.env.FLOW_PROJECT_2 || 'https://flow.google.com/project/b8c98d11-92ce-430f-9114-f3f42c265cdf',
-  process.env.FLOW_PROJECT_3 || 'https://flow.google.com/project/6cb075cf-7b9e-4b65-b35c-24b363da057a',
-];
+// Each worker owns one (Google account session, Flow project) pair. A Flow project
+// belongs to the account that created it, so a worker must drive the browser that is
+// signed into that account — pairing a project with the wrong CDP port renders nothing.
+//
+// FLOW_WORKERS="cdpPort=projectUrl,cdpPort=projectUrl,..."
+const WORKERS = (process.env.FLOW_WORKERS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+  .map(entry => {
+    const [port, project] = entry.split('=');
+    return { cdp: `http://127.0.0.1:${port.trim()}`, project: project.trim() };
+  });
+
+const FLOW_PROJECT_URLS = WORKERS.length
+  ? WORKERS.map(w => w.project)
+  : [
+      process.env.FLOW_PROJECT_1 || 'https://flow.google.com/project/0e935f47-3f1e-4546-9972-431b328de86f',
+      process.env.FLOW_PROJECT_2 || 'https://flow.google.com/project/b8c98d11-92ce-430f-9114-f3f42c265cdf',
+      process.env.FLOW_PROJECT_3 || 'https://flow.google.com/project/6cb075cf-7b9e-4b65-b35c-24b363da057a',
+    ];
 
 const MODEL = process.env.NIGHTMARE_FLOW_MODEL_VIDEO || 'Omni 1.1 Flash';
 const RESOLUTION = process.env.NIGHTMARE_FLOW_VIDEO_RESOLUTION || '360p';
@@ -199,7 +213,7 @@ function buildSpawnCmd() {
 
 const SPAWN_CMD = buildSpawnCmd();
 
-function runCdpSubprocess(job, projectUrl) {
+function runCdpSubprocess(job, projectUrl, cdpUrl) {
   return new Promise((resolvePromise, reject) => {
     // Sanitize prompt for CLI argument (collapse whitespace, keep single quotes)
     const sanitizedPrompt = job.motionPrompt.replace(/"/g, "'").replace(/\s+/g, ' ').trim();

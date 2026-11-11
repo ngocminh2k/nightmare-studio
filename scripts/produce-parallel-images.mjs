@@ -21,11 +21,27 @@ const EPISODE_ID = process.env.NIGHTMARE_EPISODE_ID || '812b393b-d263-4670-a144-
 const CDP_URL = process.env.NIGHTMARE_CANVAS_CDP_URL || 'http://127.0.0.1:9222';
 const DB_PATH = process.env.NIGHTMARE_DB_PATH || 'data/studio.db';
 
-const FLOW_PROJECT_URLS = [
-  process.env.FLOW_PROJECT_1 || 'https://flow.google.com/project/0e935f47-3f1e-4546-9972-431b328de86f',
-  process.env.FLOW_PROJECT_2 || 'https://flow.google.com/project/b8c98d11-92ce-430f-9114-f3f42c265cdf',
-  process.env.FLOW_PROJECT_3 || 'https://flow.google.com/project/6cb075cf-7b9e-4b65-b35c-24b363da057a',
-];
+// Each worker owns one (Google account session, Flow project) pair. A Flow project
+// belongs to the account that created it, so a worker must drive the browser that is
+// signed into that account — pairing a project with the wrong CDP port renders nothing.
+//
+// FLOW_WORKERS="cdpPort=projectUrl,cdpPort=projectUrl,..."
+const WORKERS = (process.env.FLOW_WORKERS || '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean)
+  .map(entry => {
+    const [port, project] = entry.split('=');
+    return { cdp: `http://127.0.0.1:${port.trim()}`, project: project.trim() };
+  });
+
+const FLOW_PROJECT_URLS = WORKERS.length
+  ? WORKERS.map(w => w.project)
+  : [
+      process.env.FLOW_PROJECT_1 || 'https://flow.google.com/project/0e935f47-3f1e-4546-9972-431b328de86f',
+      process.env.FLOW_PROJECT_2 || 'https://flow.google.com/project/b8c98d11-92ce-430f-9114-f3f42c265cdf',
+      process.env.FLOW_PROJECT_3 || 'https://flow.google.com/project/6cb075cf-7b9e-4b65-b35c-24b363da057a',
+    ];
 
 const MODEL = process.env.NIGHTMARE_FLOW_MODEL_IMAGE || 'Nano Banana 2';
 const ASPECT_RATIO = process.env.NIGHTMARE_FLOW_ASPECT_RATIO || '16:9';
@@ -162,7 +178,7 @@ function buildSpawnCmd() {
 
 const SPAWN_CMD = buildSpawnCmd();
 
-function runImageCdpSubprocess(job, projectUrl) {
+function runImageCdpSubprocess(job, projectUrl, cdpUrl) {
   return new Promise((resolvePromise, reject) => {
     const sanitizedPrompt = job.prompt.replace(/"/g, "'").replace(/\s+/g, ' ').trim();
     const baseArgs = SPAWN_CMD.length > 1 ? [SPAWN_CMD[1]] : [];
@@ -174,7 +190,7 @@ function runImageCdpSubprocess(job, projectUrl) {
       '--model', MODEL,
       '--aspectRatio', ASPECT_RATIO,
       '--output', job.imgPath,
-      '--cdp', CDP_URL,
+      '--cdp', cdpUrl,
       '--projectUrl', projectUrl,
     ];
 
@@ -185,7 +201,7 @@ function runImageCdpSubprocess(job, projectUrl) {
     const child = spawn(SPAWN_CMD[0], cmdArgs, {
       cwd: PROJECT_ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NIGHTMARE_CANVAS_CDP_URL: CDP_URL },
+      env: { ...process.env, NIGHTMARE_CANVAS_CDP_URL: cdpUrl },
       timeout: 5 * 60_000,
     });
 
@@ -209,7 +225,8 @@ function runImageCdpSubprocess(job, projectUrl) {
   });
 }
 
-async function workerLoop(workerId, projectUrl, queue, scenes) {
+async function workerLoop(workerId, worker, queue, scenes) {
+  const { cdp, project: projectUrl } = worker;
   const tag = `[W${workerId}]`;
   let completed = 0;
   let failed = 0;
@@ -227,7 +244,7 @@ async function workerLoop(workerId, projectUrl, queue, scenes) {
     const t0 = Date.now();
 
     try {
-      await runImageCdpSubprocess(job, projectUrl);
+      await runImageCdpSubprocess(job, projectUrl, cdp);
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       const size = statSync(job.imgPath).size;
       console.log(`${tag} ✅ ${sceneTag} image done (${elapsed}s, ${(size / 1024).toFixed(0)}KB)`);
@@ -296,7 +313,7 @@ async function main() {
   const t0 = Date.now();
   const results = await Promise.allSettled(
     Array.from({ length: workerCount }, (_, i) =>
-      workerLoop(i, FLOW_PROJECT_URLS[i], queue, scenes)
+      workerLoop(i, WORKERS[i] || { cdp: CDP_URL, project: FLOW_PROJECT_URLS[i] }, queue, scenes)
     )
   );
 
