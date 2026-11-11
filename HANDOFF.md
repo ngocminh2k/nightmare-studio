@@ -29,7 +29,7 @@
 
 Chrome extension: profile riêng cho từng account tại `F:\truyen_ma\chrome-profiles\account-NN`.
 
-> **Một** flowkit + đổi account **tuần tự**. `app/pool_manager.py` là code chết.
+> **Một** flowkit + đổi account **tuần tự**. `app/pool_manager.py` đã bị xoá (code chết).
 
 ### Đổi Google Flow account
 ```powershell

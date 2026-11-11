@@ -36,7 +36,7 @@ Invoke-RestMethod http://127.0.0.1:3900/health
 .\scripts\switch-account.ps1 -List
 .\scripts\switch-account.ps1 -Account 2
 ```
-> Chỉ dùng **một** flowkit + đổi account **tuần tự**. `app/pool_manager.py` là code chết, đừng dùng.
+> Chỉ dùng **một** flowkit + đổi account **tuần tự**. `app/pool_manager.py` đã bị xoá (code chết, không dùng pool nhiều account).
 
 ---
 
