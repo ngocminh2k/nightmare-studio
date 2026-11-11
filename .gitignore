@@ -44,5 +44,6 @@ data/canvas-cdp-profile/
 
 # Throwaway probes written at the repo root while debugging Flow/Google APIs.
 /*.mjs
+/*.mjs.tmp.*
 /cov_*.txt
 /.nofix.txt
