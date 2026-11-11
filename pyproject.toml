@@ -18,6 +18,12 @@ dev = [
   "pytest>=8.0",
 ]
 
+# Flat-layout auto-discovery trips over the top-level web/ assets/ dashboard/
+# directories ("Multiple top-level packages discovered"). Only the backend is
+# an installable package.
+[tool.setuptools]
+packages = ["app"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

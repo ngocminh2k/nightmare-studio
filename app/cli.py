@@ -68,7 +68,7 @@ def cmd_produce(args: argparse.Namespace, repository: StudioRepository) -> dict:
     service = EpisodeProductionService(repository, runner)
     if args.rebuild_package:
         if not args.episode_id:
-            raise ValueError("--rebuild-package requires --episode-id")
+            raise SystemExit("--rebuild-package requires --episode-id")
         episode = service.rebuild_package(args.episode_id)
     elif args.episode_id:
         episode = service.resume(args.episode_id, approve_all=args.approve_all)

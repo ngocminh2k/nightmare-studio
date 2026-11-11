@@ -49,7 +49,8 @@ def test_router_defaults_match_the_working_local_router_model(monkeypatch):
     settings = ProviderSettings.from_environment()
 
     assert settings.router_base_url == "http://localhost:20128/v1"
-    assert settings.llm_model == "mrkane"
+    # The local router only serves the 'minh' model, so 'mrkane' is remapped onto it.
+    assert settings.llm_model == "minh"
 
 
 def test_router_llm_provider_uses_legacy_model_then_auth_fallback():

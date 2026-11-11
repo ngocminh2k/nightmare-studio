@@ -59,7 +59,9 @@ def test_voice_studio_provider_generates_speech(tmp_path):
 
     output_file = tmp_path / "test_output.mp3"
 
-    with patch("app.audio.urlopen", return_value=mock_response) as mock_urlopen:
+    with patch("app.audio.urlopen", return_value=mock_response) as mock_urlopen, patch.object(
+        VoiceStudioAudioProvider, "_resolve_voice_id", return_value="ab36bbf3"
+    ):
         result = provider.generate_speech("Hello, this is Mr. Kane.", output_file, voice="mrkane")
         assert result == output_file
         assert output_file.read_bytes() == b"fake-mp3-audio-bytes"
@@ -69,7 +71,8 @@ def test_voice_studio_provider_generates_speech(tmp_path):
         assert req.full_url == "http://127.0.0.1:3900/v1/audio/speech"
         payload = json.loads(req.data.decode("utf-8"))
         assert payload["input"] == "Hello, this is Mr. Kane."
-        assert payload["voice"] == "mrkane"
+        # The provider resolves the profile name to its VoiceStudio UUID.
+        assert payload["voice"] == "ab36bbf3"
         assert payload["model"] == "omnivoice"
         assert payload["response_format"] == "mp3"
 

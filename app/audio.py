@@ -242,11 +242,15 @@ class VoiceStudioAudioProvider:
 
             return output_path
         except Exception as exc:
+            # Fail loud. Falling back to atmospheric audio here is what produced
+            # a silent master video: the episode looks finished but carries no
+            # narration. The deterministic provider stays reachable on purpose
+            # via NIGHTMARE_AUDIO_MODE, not via a silent catch-all.
             import logging
-            logging.getLogger("nightmare_studio.audio").warning(
-                "VoiceStudio synthesis unavailable (%s); falling back to deterministic atmospheric audio", exc
+            logging.getLogger("nightmare_studio.audio").error(
+                "VoiceStudio synthesis failed (%s); episode audio cannot be generated", exc
             )
-            return DeterministicAudioProvider().generate_speech(clean_text, output_path, voice=voice, speed=speed)
+            raise
 
     def generate_continuous_speech(
         self,
