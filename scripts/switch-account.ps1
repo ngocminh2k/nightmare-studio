@@ -250,9 +250,14 @@ while ((Get-Date) -lt $deadline2) {
         }
         if ($ProjectId) {
             try {
-                $probe = Invoke-RestMethod -Uri "$flowkitBase/api/flow/debug-project-media?project_id=$ProjectId" -TimeoutSec 90 -ErrorAction Stop
-                if ([int]$probe.raw_length -gt 1000) { $probed = $true; break }
+                $credits = Invoke-RestMethod -Uri "$flowkitBase/api/flow/credits" -TimeoutSec 30 -ErrorAction Stop
+                if ($null -ne $credits) { $probed = $true; break }
             } catch {
+                try {
+                    $probe = Invoke-RestMethod -Uri "$flowkitBase/api/flow/debug-project-media?project_id=$ProjectId" -TimeoutSec 90 -ErrorAction Stop
+                    if ([int]$probe.raw_length -gt 1000) { $probed = $true; break }
+                } catch {
+                }
             }
         }
     }
