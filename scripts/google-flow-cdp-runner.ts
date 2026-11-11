@@ -159,6 +159,8 @@ export const MODEL_ALIASES = new Map<string, string>([
   ['Omni 1.1', 'Omni 1.1 Flash'],
   ['omniflash 1.2', 'Omni Flash 1.2'],
   ['Omni 1.2', 'Omni Flash 1.2'],
+  ['Omni 1.2 Flash', 'Omni Flash 1.2'],
+  ['omniflash 1.2 flash', 'Omni Flash 1.2'],
 ]);
 
 // The Flow UI has shipped the same model under two spellings, so try both.

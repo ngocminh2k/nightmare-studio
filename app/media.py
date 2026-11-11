@@ -1370,6 +1370,10 @@ class GoogleFlowKitMediaProvider:
       NIGHTMARE_FLOWKIT_PROJECT   — Flow project UUID (from flow.google.com URL)
       NIGHTMARE_FLOWKIT_MODEL_IMAGE — NANO_BANANA_2 (default) | NANO_BANANA_PRO | NANO_BANANA_2_LITE
       NIGHTMARE_FLOWKIT_MODEL_VIDEO — omni_flash (default, reliable) | veo (i2v only)
+      NIGHTMARE_FLOWKIT_OMNI_VERSION — 1.1 (default) | 1.2 (macaron_cookie, 3-15s)
+        Only honoured when NIGHTMARE_FLOWKIT_MODEL_VIDEO=omni_flash and flowkit PR #85
+        is merged/installed. Without that version, omni_version is silently ignored.
+        Duration cap still applies: even 1.2 clips are clamped to 10s here.
     """
 
     name = "flowkit"
@@ -1391,6 +1395,9 @@ class GoogleFlowKitMediaProvider:
         raw_img_model = (os.getenv("NIGHTMARE_FLOWKIT_MODEL_IMAGE") or "").strip().upper()
         self.model_image = raw_img_model if raw_img_model in self._IMAGE_MODELS else self._DEFAULT_IMAGE_MODEL
         self.model_video = (os.getenv("NIGHTMARE_FLOWKIT_MODEL_VIDEO") or "omni_flash").strip().lower()
+        self.omni_version = (os.getenv("NIGHTMARE_FLOWKIT_OMNI_VERSION") or "1.1").strip()
+        if self.omni_version not in {"1.1", "1.2"}:
+            self.omni_version = "1.1"
         self.resolution = (os.getenv("NIGHTMARE_FLOWKIT_VIDEO_RESOLUTION") or "360p").strip().lower()
         self.timeout = int(os.getenv("NIGHTMARE_FLOWKIT_VIDEO_TIMEOUT", "300"))
         self.allow_fallback = os.getenv("NIGHTMARE_ALLOW_MOTION_FALLBACK", "false").lower() in {"1", "true", "yes"}
@@ -1798,6 +1805,10 @@ class GoogleFlowKitMediaProvider:
                     "model_family": self.model_video,  # "omni_flash" or "veo"
                     "duration_s": final_duration,
                     "resolution": self.resolution,
+                    # omni_version is forwarded only for omni_flash; flowkit PR #85
+                    # adds omni_version="1.2" support (macaron_cookie, 3-15s).
+                    # Older flowkit silently ignores the extra field.
+                    **({"omni_version": self.omni_version} if self.model_video == "omni_flash" else {}),
                 },
                 base=base,
             )

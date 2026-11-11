@@ -85,9 +85,10 @@ Mọi script nhận `--episode-id <uuid>` (hoặc env `NIGHTMARE_EPISODE_ID`). *
    `scripts/google-flow-cdp-runner.ts`). Không nâng lên 15s khi UI có sẵn lựa chọn đó.
 
 ### Chọn model video
-- **CDP runner** (`scripts/google-flow-cdp-runner.ts`): `--model "Omni Flash 1.2"` chỉ chạy được
-  khi account đã có model trong UI (UI có thể hiện "Omni Flash 1.2" hoặc "Omni 1.2 Flash" —
-  runner thử cả hai). Mặc định vẫn là `Omni 1.1 Flash`.
+- **CDP runner** (`scripts/google-flow-cdp-runner.ts`): chọn qua `NIGHTMARE_FLOW_MODEL_VIDEO`
+  (mặc định `Omni 1.1 Flash`), ví dụ `NIGHTMARE_FLOW_MODEL_VIDEO="Omni Flash 1.2"`.
+  Chỉ chạy được khi account đã có model trong UI (UI có thể hiện "Omni Flash 1.2" hoặc
+  "Omni 1.2 Flash" — runner thử cả hai).
 - **FlowKit** (`NIGHTMARE_FLOWKIT_MODEL_VIDEO`): giá trị được truyền thẳng làm `model_family`.
   FlowKit hiện chỉ có `omni_flash` (key `abra_i2v_{4,6,8,10}s`) và `veo`; **chưa có** family 1.2.
   Muốn dùng 1.2 qua flowkit thì phải thêm key vào `agent/models.json` của flowkit
