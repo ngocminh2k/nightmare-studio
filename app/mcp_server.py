@@ -17,6 +17,7 @@ Tools:
 from __future__ import annotations
 
 import json
+import logging
 import os
 import traceback
 from pathlib import Path
@@ -146,17 +147,18 @@ async def list_tools():
 
 @app.post("/tools/call")
 async def call_tool(request: Request):
-    body = await request.json()
-    name = body.get("name")
-    args = body.get("arguments") or body.get("input") or {}
+    name = ""
     try:
+        body = await request.json()
+        name = body.get("name")
+        args = body.get("arguments") or body.get("input") or {}
         result = await _dispatch(name, args)
         return {"content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False, indent=2)}]}
     except Exception as e:
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(e), "trace": traceback.format_exc()[-500:]},
-        )
+        # Log the trace locally; never return it to the caller — the endpoint
+        # is reachable from other agents and stack traces leak internals.
+        logging.getLogger("nightmare_studio.mcp").error("Tool %s failed: %s", name, traceback.format_exc())
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 
 async def _dispatch(name: str, args: dict[str, Any]) -> Any:
@@ -309,7 +311,9 @@ def _rate_episode(episode_id: str) -> dict:
 
     sb = _json.loads(ep["storyboard_json"] or "[]")
     scenes = sb if isinstance(sb, list) else sb.get("scenes", [])
-    out = Path(ep["output_path"] or "")
+    # An episode without an output path has no assets to score. Path("") would
+    # resolve to the current working directory and glob it by accident.
+    out = Path(ep["output_path"]) if ep["output_path"] else None
     n = len(scenes)
 
     # ── heuristic scoring ────────────────────────────────────────────────────
@@ -345,7 +349,7 @@ def _rate_episode(episode_id: str) -> dict:
         pacing = 5.0
 
     # asset_completeness: images/videos present on disk
-    if out.exists():
+    if out is not None and out.exists():
         images = list(out.glob("scene_*.png")) + list(out.glob("scene_*.jpg"))
         videos = list(out.glob("scene_*.mp4")) + list(out.glob("scene_*.webm"))
         img_ratio = len(images) / n if n else 0
@@ -429,7 +433,7 @@ def _regenerate_scenes(episode_id: str, scene_numbers: list[int], reason: str) -
         media_provider=configured_media_provider(CanvasCDPSettings.from_environment()),
         audio_provider=configured_audio_provider(AudioSettings.from_environment()),
     )
-    runner.run(job_id, episode_id)
+    runner.run(job_id)
     return {"regenerated_scenes": regenerated, "reason": reason, "job_id": job_id}
 
 

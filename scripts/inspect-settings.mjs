@@ -1,8 +1,9 @@
 import { chromium } from 'playwright-core';
+import { isFlowPage } from './flow-url.mjs';
 
 async function main() {
   const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
-  const page = browser.contexts()[0].pages().find(p => p.url().includes('flow.google.com'));
+  const page = browser.contexts()[0].pages().find(p => isFlowPage(p.url()));
   if (!page) {
     console.log('No Flow page found');
     await browser.close();

@@ -1,9 +1,10 @@
 import { chromium } from 'playwright';
+import { isFlowPage } from './flow-url.mjs';
 
 async function main() {
   const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
   const context = browser.contexts()[0] || (await browser.newContext());
-  const page = context.pages().find((p) => p.url().includes('flow.google.com')) || context.pages()[0];
+  const page = context.pages().find((p) => isFlowPage(p.url())) || context.pages()[0];
   const count = await page.locator('.batch-container').count();
   for (let i = 0; i < count; i++) {
     const topBatch = page.locator('.batch-container').first();

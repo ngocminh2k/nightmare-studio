@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Protocol
 from urllib.error import HTTPError
-from urllib.parse import unquote_to_bytes, urljoin
+from urllib.parse import unquote_to_bytes, urljoin, urlparse
 from urllib.request import Request, urlopen
 
 from app.nanobanana_prompt_rules import build_nanobanana_image_prompt
@@ -840,9 +840,7 @@ class GoogleFlowCDPMediaProvider(CanvasCDPMediaProvider):
                     (
                         item
                         for item in context.pages
-                        if "flow.google.com" in item.url
-                        or "labs.google" in item.url
-                        or self._is_exact_project_canvas_url(item.url, url)
+                        if self._matches_flow_host(item.url) or self._is_exact_project_canvas_url(item.url, url)
                     ),
                     None,
                 )
@@ -913,6 +911,13 @@ class GoogleFlowCDPMediaProvider(CanvasCDPMediaProvider):
     @staticmethod
     def _is_exact_project_canvas_url(candidate_url: str, expected_url: str) -> bool:
         return candidate_url.rstrip("/") == expected_url.rstrip("/")
+
+    @staticmethod
+    def _matches_flow_host(url: str) -> bool:
+        """True when the URL's host is Google Flow. Matches on the parsed
+        hostname, not a substring, so look-alike hosts cannot pass."""
+        host = (urlparse(url).hostname or "").lower()
+        return host == "flow.google.com" or host.startswith("labs.google")
 
     def _character_reference_path(self) -> Path:
         path = Path(self.settings.flow_character_reference_path).expanduser()
