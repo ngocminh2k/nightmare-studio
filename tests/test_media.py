@@ -1,5 +1,6 @@
 import base64
 import importlib.util
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,6 +18,7 @@ from app.media import (
     CanvasCDPSettings,
     DeterministicMediaProvider,
     GoogleFlowCDPMediaProvider,
+    GoogleFlowKitMediaProvider,
     GoogleVeoMediaProvider,
     KiraAIMediaProvider,
     MediaNotConfiguredProvider,
@@ -645,6 +647,21 @@ def test_parse_motion_prompt_plan():
         parse_motion_prompt_plan('{"scenes": [{"number": 1, "motion_prompt": ""}]}', {1})
 
 
+    from app.media import generate_veo_prompt_plan
+
+    class FakeLLM:
+        def generate(self, messages):
+            return '{"scenes": [{"number": 1, "motion_prompt": "Slow camera push-in on subject 1"}, {"number": 2, "motion_prompt": "Slow camera push-in on subject 2"}]}'
+
+    scenes = [
+        {"number": 1, "shot": "Wide", "narration": "Night"},
+        {"number": 2, "shot": "Close-up", "narration": "Face"},
+    ]
+    prompts = generate_veo_prompt_plan(scenes, FakeLLM(), batch_size=2)
+    assert prompts[1] == "Slow camera push-in on subject 1"
+    assert prompts[2] == "Slow camera push-in on subject 2"
+
+
 def test_cdp_port_open_and_chrome_discovery(monkeypatch, tmp_path):
     assert _is_cdp_listening("http://127.0.0.1:59999", timeout=0.05) is False
 
@@ -663,3 +680,50 @@ def test_cdp_port_open_and_chrome_discovery(monkeypatch, tmp_path):
 
 
 
+
+
+def _write_account_registry(path: Path, active: int, accounts: list[dict[str, object]]) -> None:
+    path.write_text(json.dumps({"active_account": active, "accounts": accounts}), encoding="utf-8")
+
+
+def test_flowkit_provider_follows_the_active_account_registry(monkeypatch, tmp_path):
+    registry = tmp_path / "flow-accounts.json"
+    _write_account_registry(
+        registry,
+        2,
+        [{"id": 1, "project_id": "project-one"}, {"id": 2, "project_id": "project-two"}],
+    )
+    monkeypatch.setattr(GoogleFlowKitMediaProvider, "_ACCOUNTS_FILE", registry)
+    monkeypatch.setenv("NIGHTMARE_FLOWKIT_URL", "http://127.0.0.1:8100")
+    monkeypatch.setenv("NIGHTMARE_FLOWKIT_PROJECT", "project-one")
+    monkeypatch.delenv("NIGHTMARE_FLOWKIT_POOL_URL", raising=False)
+
+    provider = GoogleFlowKitMediaProvider(CanvasCDPSettings.from_environment())
+
+    assert provider.project_id == "project-two"
+
+    _write_account_registry(registry, 1, [{"id": 1, "project_id": "project-one"}])
+
+    assert provider.project_id == "project-one"
+
+
+def test_flowkit_character_reference_is_reuploaded_when_the_account_changes(monkeypatch, tmp_path):
+    reference = tmp_path / "reference.png"
+    reference.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 12_000)
+    monkeypatch.setenv("NIGHTMARE_FLOW_CHARACTER_REFERENCE_PATH", str(reference))
+    monkeypatch.delenv("NIGHTMARE_FLOWKIT_POOL_URL", raising=False)
+
+    provider = GoogleFlowKitMediaProvider(CanvasCDPSettings.from_environment())
+    uploads: list[str] = []
+
+    def fake_upload(path: Path, base: str = "", project_id: str = "") -> str:
+        uploads.append(project_id)
+        return f"media-{project_id}"
+
+    monkeypatch.setattr(provider, "_upload_image", fake_upload)
+
+    assert provider._character_media_id("http://flowkit", "project-one") == "media-project-one"
+    assert provider._character_media_id("http://flowkit", "project-two") == "media-project-two"
+    assert provider._character_media_id("http://flowkit", "project-one") == "media-project-one"
+
+    assert uploads == ["project-one", "project-two"]

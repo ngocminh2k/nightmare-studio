@@ -1,4 +1,4 @@
-"""Tests for SystemOne integration and dynamic scene pacing."""
+﻿"""Tests for SystemOne integration and dynamic scene pacing."""
 
 from __future__ import annotations
 
@@ -190,7 +190,7 @@ class TestRouterSystemOneClient:
         assert req.headers["Content-type"] == "application/json"
 
         body = json.loads(req.data.decode("utf-8"))
-        assert body["model"] == "oc/jev-1.13-free"
+        assert body["model"] == "openrouter/typesafe/jev-1.13"
         assert body["state"] == "He looked at the small key."
         assert "shot_duration" in body["questions"]
         assert result["shot_duration"] == 1.0
@@ -272,9 +272,14 @@ class TestApplyDirectorPacingIntegration:
         assert len(result) == 2
         # Durations are set and clamped within [4.0, 8.0]
         assert all(4.0 <= s["target_duration_seconds"] <= 8.0 for s in result)
-        # When client is None, shot_type and transition should not be overwritten/added
-        assert "shot_type" not in result[0]
-        assert "transition" not in result[0]
+        # Offline fallback still has to decide framing: the prompt builder reads
+        # shot_type to know whether the protagonist is in frame.
+        assert result[0]["shot_type"] in {
+            "close_up_detail",
+            "wide_establishing",
+            "character_portrait",
+        }
+        assert result[0]["transition"] in {"cut", "dissolve", "fade_black"}
         # Script budget metadata preserved
         assert "script_duration_seconds" in result[0]
         assert "visual_duration_budget_seconds" in result[0]

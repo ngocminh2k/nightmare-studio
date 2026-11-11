@@ -35,3 +35,9 @@ data/canvas-cdp-profile/
 .vscode/
 .idea/
 *.log
+*.err
+.tmp.driveupload/
+
+# Debug artifacts at repo root (screenshots, TTS test clips)
+/*.png
+/*.mp3

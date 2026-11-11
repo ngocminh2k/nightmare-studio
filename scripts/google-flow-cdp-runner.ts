@@ -173,6 +173,10 @@ export const FLOW_FIRST_FRAME_SLOT_XPATH = '//*[@id="__next"]/div[1]/div[5]/div/
 export const FLOW_LAST_FRAME_SLOT_XPATH = '//*[@id="__next"]/div[1]/div[5]/div/div/div/div/div[1]/div[2]';
 
 export const FLOW_DOWNLOAD_BUTTON_SELECTORS = [
+  '.batch-toolbar button[aria-label*="Tải xuống" i]',
+  '.batch-toolbar button[aria-label*="Download" i]',
+  '.batch-toolbar button:has(mat-icon:has-text("download"))',
+  'button[aria-label="Tải xuống hàng loạt"]',
   `xpath=${FLOW_BATCH_DOWNLOAD_BUTTON_XPATH}`,
   'button:has-text("Download")',
   'button:has-text("Tải xuống")',
@@ -505,6 +509,33 @@ export const extractMediaFromZip = (
   }
 };
 
+const getImageDimensions = (buffer: Buffer): { width: number; height: number } | null => {
+  if (buffer.length < 24) return null;
+  // PNG: bytes 16-24
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
+    return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+  }
+  // JPEG: scan for SOF marker
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+    let offset = 2;
+    while (offset < buffer.length - 8) {
+      if (buffer[offset] !== 0xff) {
+        offset++;
+        continue;
+      }
+      const marker = buffer[offset + 1];
+      if (marker === 0xc0 || marker === 0xc1 || marker === 0xc2) {
+        const height = buffer.readUInt16BE(offset + 5);
+        const width = buffer.readUInt16BE(offset + 7);
+        return { width, height };
+      }
+      const length = buffer.readUInt16BE(offset + 2);
+      offset += 2 + length;
+    }
+  }
+  return null;
+};
+
 const saveFlowDownload = async (
   download: any,
   outputPath: string,
@@ -564,6 +595,19 @@ const saveFlowDownload = async (
       log(`ZIP validation error: ${err.message}`);
     }
     if (savedOk && existsSync(outputPath) && statSync(outputPath).size > 0) {
+      if (mode === 'image') {
+        try {
+          const buf = readFileSync(outputPath);
+          const dims = getImageDimensions(buf);
+          if (dims && dims.width === 1672 && dims.height === 941) {
+            log('[REJECT] downloaded image matches character reference dimensions (1672x941); discarding.');
+            try {
+              rmSync(outputPath, { force: true });
+            } catch {}
+            return null;
+          }
+        } catch {}
+      }
       return { outputPath, suggestedFilename: suggested };
     }
   }
@@ -982,14 +1026,19 @@ const clearFlowComposer = async (page: any) => {
   }
 
   const cancelChips = page.locator(
-    'flow-prompt-box mat-icon:has-text("cancel"), flow-image-ingredient-chip mat-icon:has-text("cancel"), i:has-text("cancel"), button:has-text("cancel"), [data-card-open] [aria-label*="Remove"], [data-card-open] [aria-label*="Xóa"], .sc-272106cb-0, .sc-272106cb-2',
+    '.chip-container:has-text("cancel"), flow-prompt-box button:has-text("cancel"), flow-prompt-box mat-icon:has-text("cancel"), flow-image-ingredient-chip mat-icon:has-text("cancel"), [data-card-open] [aria-label*="Remove"], [data-card-open] [aria-label*="Xóa"]',
   );
-  const count = await cancelChips.count().catch(() => 0);
-  for (let i = 0; i < count; i++) {
-    const chip = cancelChips.first();
-    if (await chip.isVisible().catch(() => false)) {
-      await safeClick(chip);
-      await wait(100);
+  let chipCount = await cancelChips.count().catch(() => 0);
+  while (chipCount > 0) {
+    const firstChip = cancelChips.first();
+    if (await firstChip.isVisible().catch(() => false)) {
+      await safeClick(firstChip);
+      await wait(150);
+      const nextCount = await cancelChips.count().catch(() => 0);
+      if (nextCount === chipCount) break;
+      chipCount = nextCount;
+    } else {
+      break;
     }
   }
 
@@ -1035,7 +1084,7 @@ const countRenderedFlowMedia = async (
   excludedSources = new Set<string>(),
 ): Promise<number> => {
   if (mode === 'video') {
-    return page.locator('video').evaluateAll(
+    const videoElementsCount = await page.locator('video').evaluateAll(
       (videos: HTMLElement[], ignored: string[]) => {
         const unique = new Set(
           videos
@@ -1046,6 +1095,11 @@ const countRenderedFlowMedia = async (
       },
       [...excludedSources],
     );
+    if (videoElementsCount > 0) return videoElementsCount;
+    const videoBatches = await page.locator(
+      '.batch-container:has-text("play_circle"), .batch-container:has-text("360p"), .batch-container:has(mat-icon:has-text("play_circle"))'
+    ).count().catch(() => 0);
+    return Math.max(0, videoBatches - excludedSources.size);
   }
   return page.locator('img').evaluateAll(
     (images: HTMLElement[], ignored: string[]) => {
@@ -1070,11 +1124,30 @@ const captureRenderedFlowImages = async (page: any, excludedSources = new Set<st
       const candidates = imageElements
         .map((item) => {
           const rect = item.getBoundingClientRect();
-          const src = (item as HTMLImageElement).currentSrc || (item as HTMLImageElement).src;
-          return { src, area: rect.width * rect.height };
+          const img = item as HTMLImageElement;
+          const src = img.currentSrc || img.src;
+          const w = img.naturalWidth || Math.round(rect.width);
+          const h = img.naturalHeight || Math.round(rect.height);
+          const inBatch = Boolean(img.closest('.batch-container'));
+          return { src, area: rect.width * rect.height, naturalWidth: w, naturalHeight: h, inBatch };
         })
-        .filter((item) => item.src && !ignored.includes(item.src))
-        .sort((left, right) => right.area - left.area);
+        .filter((item) => {
+          if (!item.src || ignored.includes(item.src)) return false;
+          // Filter out character reference image (1672x941)
+          if (item.naturalWidth === 1672 && item.naturalHeight === 941) return false;
+          // Filter out UI icons/drawers
+          if (item.naturalWidth < 200 || item.naturalHeight < 200) return false;
+          return true;
+        })
+        .sort((left, right) => {
+          if (left.inBatch !== right.inBatch) return left.inBatch ? -1 : 1;
+          const leftRatio = left.naturalWidth / (left.naturalHeight || 1);
+          const rightRatio = right.naturalWidth / (right.naturalHeight || 1);
+          const leftDiff = Math.abs(leftRatio - 16 / 9);
+          const rightDiff = Math.abs(rightRatio - 16 / 9);
+          if (Math.abs(leftDiff - rightDiff) > 0.08) return leftDiff - rightDiff;
+          return right.area - left.area;
+        });
       const unique = [...new Map(candidates.map((item) => [item.src, item])).values()];
       return (
         await Promise.all(
@@ -1111,6 +1184,11 @@ const captureRenderedFlowImages = async (page: any, excludedSources = new Set<st
   return images
     .filter((image: any): image is { contentType: string; bytes: number[] } => Boolean(image && image.bytes && image.bytes.length))
     .filter((image: any) => !isFlowPlaceholderImage(new Uint8Array(image.bytes)))
+    .filter((image: any) => {
+      const dims = getImageDimensions(Buffer.from(image.bytes));
+      if (dims && dims.width === 1672 && dims.height === 941) return false;
+      return true;
+    })
     .map((image: any) => {
       const extension = image.contentType.includes('jpeg') ? '.jpg' : image.contentType.includes('webp') ? '.webp' : '.png';
       return { bytes: new Uint8Array(image.bytes), suggestedFilename: `flow-render${extension}` };
@@ -1126,15 +1204,14 @@ const captureRenderedFlowVideos = async (page: any, excludedSources = new Set<st
           const source = (item as HTMLMediaElement).currentSrc || (item as HTMLMediaElement).src || item.querySelector('source')?.src;
           return { src: source, area: rect.width * rect.height };
         })
-        .filter((item) => item.src && !ignored.includes(item.src))
-        .sort((left, right) => right.area - left.area);
+        .filter((item) => item.src && !ignored.includes(item.src));
       const unique = [...new Map(candidates.map((item) => [item.src, item])).values()];
       return (
         await Promise.all(
           unique.map(async (item) => {
             try {
               if (!item.src) return null;
-              const response = await fetch(item.src, { mode: 'cors', credentials: 'include' }).catch(() => null);
+              const response = await fetch(item.src).catch(() => null);
               if (response && response.ok) {
                 const bytes = new Uint8Array(await response.arrayBuffer());
                 if (bytes.length >= 256) return { contentType: response.headers.get('content-type') || '', bytes: Array.from(bytes) };
@@ -1163,16 +1240,20 @@ const captureRenderedFlowVideos = async (page: any, excludedSources = new Set<st
 const isFlowAddMenuOpen = async (page: any): Promise<boolean> => {
   return await page
     .evaluate(() => {
-      const panes = Array.from(document.querySelectorAll('.cdk-overlay-pane, .mat-mdc-menu-panel, [role="menu"], [role="dialog"]'));
+      const popover = document.querySelector('flow-add-menu-popover-content');
+      if (popover && (popover as HTMLElement).offsetWidth > 0 && (popover as HTMLElement).offsetHeight > 0) {
+        return true;
+      }
+      const panes = Array.from(document.querySelectorAll('.cdk-overlay-pane'));
       return panes.some((pane) => {
         const el = pane as HTMLElement;
         if (!el || !el.offsetWidth || !el.offsetHeight) return false;
+        if (el.classList.contains('mat-mdc-tooltip-panel') || el.querySelector('.mat-mdc-tooltip-panel')) return false;
         const style = window.getComputedStyle(el);
         if (style.visibility === 'hidden' || style.display === 'none' || style.opacity === '0') return false;
-        const hasInput = !!el.querySelector('input');
-        const hasBtn = !!el.querySelector('button, [role="button"], .sidebar-upload-btn');
+        const hasUpload = !!el.querySelector('.sidebar-upload-btn, button.asset-item');
         const text = (el.innerText || '').toLowerCase();
-        return hasInput || hasBtn || text.includes('tải') || text.includes('upload') || text.includes('thành phần');
+        return hasUpload || text.includes('tải nội dung');
       });
     })
     .catch(() => false);
@@ -1262,60 +1343,31 @@ const selectAndAttachAssetToPrompt = async (
   const filename = basename(targetFilename);
   const nameWithoutExt = filename.replace(/\.[^.]+$/, '');
 
-  const matchingIndex = await page
-    .evaluate(
-      (target: { full: string; clean: string }) => {
-        const pane = document.querySelector('.cdk-overlay-pane, .mat-mdc-menu-panel, [role="dialog"]');
-        if (!pane) return null;
-        const cards = Array.from(pane.querySelectorAll('.asset-item, [role="option"], .media-card, flow-asset-item, button:has(img), img'));
-        for (let i = 0; i < cards.length; i++) {
-          const card = cards[i] as HTMLElement;
-          const text = (card.innerText || '').toLowerCase();
-          const title = (card.getAttribute('title') || '').toLowerCase();
-          const alt = (card.getAttribute('alt') || '').toLowerCase();
-          const src = (card.getAttribute('src') || '').toLowerCase();
-          if (
-            text.includes(target.full.toLowerCase()) ||
-            text.includes(target.clean.toLowerCase()) ||
-            title.includes(target.full.toLowerCase()) ||
-            title.includes(target.clean.toLowerCase()) ||
-            alt.includes(target.full.toLowerCase()) ||
-            alt.includes(target.clean.toLowerCase()) ||
-            src.includes(target.clean.toLowerCase())
-          ) {
-            return i;
-          }
-        }
-        return null;
-      },
-      { full: filename, clean: nameWithoutExt },
-    )
-    .catch(() => null);
-
-  const cardsLocator = page.locator(
-    '.cdk-overlay-pane button.asset-item, .cdk-overlay-pane .asset-item, .cdk-overlay-pane [role="option"], .cdk-overlay-pane .media-card, .cdk-overlay-pane flow-asset-item, .cdk-overlay-pane button:has(img), .cdk-overlay-pane img',
+  const candidateCards = page.locator(
+    'flow-add-menu-popover-content button.asset-item, .cdk-overlay-pane button.asset-item, .cdk-overlay-pane .asset-item'
   );
 
-  if (matchingIndex !== null) {
-    const card = cardsLocator.nth(matchingIndex);
-    if (await card.isVisible().catch(() => false)) {
-      await safeClick(card);
-      await settleFlowUi();
-    }
-  } else {
-    const firstCard = cardsLocator.first();
-    if (await firstCard.isVisible().catch(() => false)) {
-      await safeClick(firstCard);
-      await settleFlowUi();
-    }
+  let targetCard = candidateCards.filter({ hasText: filename }).first();
+  if ((await targetCard.count().catch(() => 0)) === 0) {
+    targetCard = candidateCards.filter({ hasText: nameWithoutExt }).first();
   }
 
-  const addPromptBtn = await findFirst(page, FLOW_ADD_PROMPT_BUTTON_SELECTORS);
-  if (addPromptBtn && (await addPromptBtn.isVisible().catch(() => false))) {
-    await safeClick(addPromptBtn);
-    await settleFlowUi();
-    log(`attached "${filename}" to Flow prompt`);
-    return true;
+  const cardCount = await targetCard.count().catch(() => 0);
+  if (cardCount > 0 && (await targetCard.isVisible().catch(() => false))) {
+    const isActive = await targetCard.evaluate((el: HTMLElement) => el.classList.contains('asset-item-active')).catch(() => false);
+    if (!isActive) {
+      await safeClick(targetCard);
+      await wait(400);
+    }
+    const addPromptBtn = page.locator('.detail-add-to-prompt-btn, button.detail-add-to-prompt-btn, button:has-text("Thêm vào câu lệnh"), button:has-text("Add to prompt")').first();
+    const btnCount = await addPromptBtn.count().catch(() => 0);
+    if (btnCount > 0 && (await addPromptBtn.isVisible().catch(() => false))) {
+      await addPromptBtn.evaluate((el: HTMLElement) => el.click()).catch(() => safeClick(addPromptBtn));
+      await wait(600);
+      await settleFlowUi();
+      log(`attached "${filename}" to Flow prompt`);
+      return true;
+    }
   }
 
   return false;
@@ -1331,18 +1383,95 @@ const uploadAndAttachFlowMedia = async (
 
   // 1. Video Frames mode: slot based
   if (job.mode === 'video' && job.videoInputMode === 'frames') {
-    const nativeInput = await page.locator('input[type="file"]').first();
+    const filename = basename(mediaPaths[0]);
+    const startFrameTrigger = page.locator('.frame-trigger').first();
+    const startTriggerExists = (await startFrameTrigger.count().catch(() => 0)) > 0;
+
+    if (startTriggerExists) {
+      log(`configuring start frame slot for "${filename}"...`);
+      // Clear any pre-existing attachment in the start frame slot
+      const cancelBtn = startFrameTrigger.locator('button:has-text("cancel"), mat-icon:has-text("cancel"), button[aria-label*="Xoá" i]').first();
+      if ((await cancelBtn.count().catch(() => 0)) > 0) {
+        await safeClick(cancelBtn);
+        await settleFlowUi();
+      }
+
+      // Open the frame picker overlay
+      const startSlotBtn = startFrameTrigger.locator('button').first();
+      if ((await startSlotBtn.count().catch(() => 0)) > 0) {
+        await safeClick(startSlotBtn);
+        await settleFlowUi();
+
+        // Helper to commit the selected asset in the overlay to the start frame slot
+        const commitAssetToSlot = async (): Promise<boolean> => {
+          const addBtn = page.locator('.detail-add-to-prompt-btn, button.detail-add-to-prompt-btn, button:has-text("Thêm vào câu lệnh"), button:has-text("Add to prompt")').first();
+          if ((await addBtn.count().catch(() => 0)) > 0 && (await addBtn.isVisible().catch(() => false))) {
+            await addBtn.evaluate((el: HTMLElement) => el.click()).catch(() => safeClick(addBtn));
+            await wait(600);
+            await settleFlowUi();
+            return true;
+          }
+          return false;
+        };
+
+        // Check if the target image is already in the overlay list
+        const existingCard = page.locator('.cdk-overlay-pane button, .cdk-overlay-pane .asset-item').filter({ hasText: filename }).first();
+        if ((await existingCard.count().catch(() => 0)) > 0) {
+          log(`selecting pre-existing asset "${filename}" from frame overlay`);
+          await safeClick(existingCard);
+          await settleFlowUi();
+          const committed = await commitAssetToSlot();
+          log(`commit start frame button clicked: ${committed}`);
+          await page.keyboard.press('Escape').catch(() => {});
+          await settleFlowUi();
+          const hasImg = (await page.locator('.frame-trigger').first().locator('img').count().catch(() => 0)) > 0;
+          log(`attached start frame "${filename}" to video composer (verified frame: ${hasImg})`);
+          return;
+        }
+
+        // Upload via filechooser inside the overlay
+        const uploadBtn = await findFlowUploadButton(page);
+        if (uploadBtn) {
+          log(`uploading frame "${filename}" via frame overlay filechooser...`);
+          const [fileChooser] = await Promise.all([
+            page.waitForEvent('filechooser', { timeout: 15_000 }),
+            safeClick(uploadBtn),
+          ]);
+          await fileChooser.setFiles(mediaPaths);
+          await settleFlowUi();
+          await waitForFlowUploadSettled(page);
+
+          // Select the newly uploaded asset
+          const newCard = page.locator('.cdk-overlay-pane button, .cdk-overlay-pane .asset-item').filter({ hasText: filename }).first();
+          if ((await newCard.count().catch(() => 0)) > 0) {
+            await safeClick(newCard);
+            await settleFlowUi();
+            const committed = await commitAssetToSlot();
+            log(`commit uploaded start frame button clicked: ${committed}`);
+          }
+          await page.keyboard.press('Escape').catch(() => {});
+          await settleFlowUi();
+          const hasImg = (await page.locator('.frame-trigger').first().locator('img').count().catch(() => 0)) > 0;
+          log(`uploaded and attached start frame "${filename}" to video composer (verified frame: ${hasImg})`);
+          return;
+        }
+      }
+    }
+
+    const nativeInput = page.locator('input[type="file"]').first();
     if ((await nativeInput.count()) > 0) {
       try {
         await nativeInput.setInputFiles(mediaPaths);
         await settleFlowUi();
         await waitForFlowUploadSettled(page);
-        log(`uploaded ${mediaPaths.length} media file(s) via native input`);
-      } catch {
-        /* continue */
+        log(`uploaded ${mediaPaths.length} media file(s) via native input for video frames`);
+        return;
+      } catch (err: any) {
+        log(`native input for frames failed (${err?.message || err}); falling back to asset menu`);
       }
+    } else {
+      log('native input[type="file"] not found; falling back to asset menu for video frame');
     }
-    return;
   }
 
   // 2. Ingredients / Reference images
@@ -1360,6 +1489,16 @@ const uploadAndAttachFlowMedia = async (
     }
 
     await clearFlowSearchInput(page);
+
+    // Try attaching pre-existing asset first to avoid redundant uploads and rate limits
+    const attachedExisting = await selectAndAttachAssetToPrompt(page, filename, log);
+    if (attachedExisting) {
+      log(`reused pre-existing asset "${filename}" from Flow library`);
+      await page.keyboard.press('Escape').catch(() => {});
+      await settleFlowUi();
+      await wait(300);
+      continue;
+    }
 
     const uploadBtn = await findFlowUploadButton(page);
     const overlayFileInput = page.locator('.cdk-overlay-pane input[type="file"], input[type="file"]').first();
@@ -1462,7 +1601,7 @@ export const runGoogleFlowJob = createExclusiveQueue(async (options: FlowRunOpti
   let page = pages.find((p: any) => {
     const u = p.url().replace(/\/$/, '');
     return u === targetUrlClean || u.startsWith(targetUrlClean);
-  }) || pages[0] || (await context.newPage());
+  }) || (await context.newPage());
 
   page.setDefaultTimeout(timeoutMs);
   page.setDefaultNavigationTimeout(Math.min(timeoutMs, 45_000));
@@ -1584,6 +1723,10 @@ export const runGoogleFlowJob = createExclusiveQueue(async (options: FlowRunOpti
     preExistingMediaUrls = job.mode === 'image' ? preExistingMedia.image : preExistingMedia.video;
     const initialDownloadCount = await page.locator(FLOW_DOWNLOAD_BUTTON_SELECTORS.join(', ')).count().catch(() => 0);
     const hadBatchBtn = Boolean(await findFirst(page, [`xpath=${FLOW_BATCH_DOWNLOAD_BUTTON_XPATH}`]));
+    const initialVideoBatches = job.mode === 'video'
+      ? await page.locator('.batch-container:has-text("play_circle"), .batch-container:has-text("360p"), .batch-container:has(mat-icon:has-text("play_circle"))').count().catch(() => 0)
+      : 0;
+    const initialTopBatchText = await page.locator('.batch-container').first().innerText().catch(() => '');
 
     log('clicking Generate button...');
     generationSubmitted = true;
@@ -1600,23 +1743,69 @@ export const runGoogleFlowJob = createExclusiveQueue(async (options: FlowRunOpti
     while (Date.now() < deadline) {
       if (job.mode === 'video' && networkMedia.length >= job.variants) break;
 
+      // Check for NEW content policy warning / generation failure in batch container
+      const topBatch = page.locator('.batch-container').first();
+      const topText = await topBatch.innerText().catch(() => '');
+      const isNewPolicyFailure =
+        topText !== initialTopBatchText &&
+        (topText.includes('Không thành công') ||
+          topText.includes('rủi ro về danh tiếng') ||
+          topText.includes('xuyên tạc') ||
+          topText.includes('vi phạm chính sách') ||
+          topText.includes('hoạt động bất thường') ||
+          topText.includes('policy'));
+      if (isNewPolicyFailure) {
+        const isRateLimit = topText.includes('hoạt động bất thường') || topText.includes('vui lòng chờ');
+        log(`Google Flow failure detected in batch (isRateLimit=${isRateLimit}): ${topText.slice(0, 150)}`);
+        // Clean up the failed batch card from UI so it doesn't linger
+        try {
+          const delBtn = topBatch.locator('button[aria-label="Xoá"], button:has-text("delete_forever"), button:has-text("delete")').first();
+          if (await delBtn.count()) {
+            await delBtn.click();
+            await wait(600);
+          }
+          await page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          await wait(1_500);
+        } catch {}
+        if (isRateLimit) {
+          throw new Error(`RATE_LIMIT_COOLDOWN: Google Flow detected unusual activity (too much traffic). Cooldown required: ${topText.slice(0, 200)}`);
+        }
+        throw new Error(`Google Flow safety policy rejected the prompt: ${topText.slice(0, 200)}`);
+      }
+
       const renderedCount = await countRenderedFlowMedia(
         page,
         job.mode,
         job.mode === 'video' ? preExistingMedia.video : preExistingMedia.image,
       );
 
-      // Early completion detection for video mode via download button
+      // Early completion detection for video mode via download button and batch cards
       if (job.mode === 'video' && outputPath) {
         const currentDownloadCount = await page.locator(FLOW_DOWNLOAD_BUTTON_SELECTORS.join(', ')).count().catch(() => 0);
         const batchBtn = await findFirst(page, [`xpath=${FLOW_BATCH_DOWNLOAD_BUTTON_XPATH}`]);
-        const newDownloadReady = currentDownloadCount > initialDownloadCount || (!hadBatchBtn && Boolean(batchBtn));
+        const currentVideoBatches = await page.locator(
+          '.batch-container:has-text("play_circle"), .batch-container:has-text("360p"), .batch-container:has(mat-icon:has-text("play_circle"))'
+        ).count().catch(() => 0);
+        const topBatch = page.locator('.batch-container').first();
+        const topText = await topBatch.innerText().catch(() => '');
+        const topHasVideo = topText.includes('play_circle') || topText.includes('360p');
+        const topHasDl = (await topBatch.locator('.batch-toolbar button[aria-label*="Tải xuống" i], .batch-toolbar button:has(mat-icon:has-text("download")), button[aria-label="Tải xuống hàng loạt"]').count().catch(() => 0)) > 0;
+
+        const newDownloadReady =
+          currentDownloadCount > initialDownloadCount ||
+          (!hadBatchBtn && Boolean(batchBtn)) ||
+          currentVideoBatches > initialVideoBatches ||
+          (topHasVideo && topHasDl && topText !== initialTopBatchText);
+
         if (newDownloadReady) {
-          log(`new video render completed (download buttons ready: ${currentDownloadCount}); saving...`);
+          log(`new video render completed (video batches: ${currentVideoBatches}/${initialVideoBatches}, download buttons: ${currentDownloadCount}); saving...`);
           await wait(FLOW_COMPLETION_SETTLE_MS);
           await settleFlowUi();
           completionSettled = true;
-          const btnToClick = batchBtn || (await findFirst(page, FLOW_DOWNLOAD_BUTTON_SELECTORS));
+          const topDlBtn = topBatch.locator(
+            '.batch-toolbar button[aria-label*="Tải xuống" i], .batch-toolbar button:has(mat-icon:has-text("download")), button[aria-label="Tải xuống hàng loạt"]'
+          ).first();
+          const btnToClick = (await topDlBtn.count()) > 0 ? topDlBtn : batchBtn || (await findFirst(page, FLOW_DOWNLOAD_BUTTON_SELECTORS));
           if (btnToClick) {
             const downloadPromise = page.waitForEvent('download', { timeout: FLOW_DOWNLOAD_WAIT_MS }).catch(() => null);
             await btnToClick.click();
@@ -1648,7 +1837,11 @@ export const runGoogleFlowJob = createExclusiveQueue(async (options: FlowRunOpti
 
           // Try UI download button
           if (outputPath) {
-            const downloadButton = await findFirst(page, FLOW_DOWNLOAD_BUTTON_SELECTORS);
+            const topBatch = page.locator('.batch-container').first();
+            const topDlBtn = topBatch.locator(
+              '.batch-toolbar button[aria-label*="Tải xuống" i], .batch-toolbar button:has(mat-icon:has-text("download")), button[aria-label="Tải xuống hàng loạt"]'
+            ).first();
+            const downloadButton = (await topDlBtn.count().catch(() => 0)) > 0 ? topDlBtn : (job.mode === 'video' ? await findFirst(page, FLOW_DOWNLOAD_BUTTON_SELECTORS) : null);
             if (downloadButton) {
               const downloadPromise = page.waitForEvent('download', { timeout: FLOW_DOWNLOAD_WAIT_MS }).catch(() => null);
               await downloadButton.click();
@@ -1693,24 +1886,26 @@ export const runGoogleFlowJob = createExclusiveQueue(async (options: FlowRunOpti
       return { renderedMedia };
     }
 
-    // 10. Fallback UI download check
-    const genTimeout = Math.max(5_000, deadline - Date.now());
-    const downloadBtn = await waitForFirst(page, FLOW_DOWNLOAD_BUTTON_SELECTORS, genTimeout);
-    if (downloadBtn && outputPath) {
-      if (!completionSettled) {
-        await wait(FLOW_COMPLETION_SETTLE_MS);
+    // 10. Fallback UI download check (video mode only)
+    if (job.mode === 'video' && outputPath) {
+      const genTimeout = Math.max(5_000, deadline - Date.now());
+      const downloadBtn = await waitForFirst(page, FLOW_DOWNLOAD_BUTTON_SELECTORS, genTimeout);
+      if (downloadBtn) {
+        if (!completionSettled) {
+          await wait(FLOW_COMPLETION_SETTLE_MS);
+          await settleFlowUi();
+          completionSettled = true;
+        }
+        const downloadPromise = page.waitForEvent('download', { timeout: FLOW_DOWNLOAD_WAIT_MS }).catch(() => null);
+        await downloadBtn.click();
         await settleFlowUi();
-        completionSettled = true;
-      }
-      const downloadPromise = page.waitForEvent('download', { timeout: FLOW_DOWNLOAD_WAIT_MS }).catch(() => null);
-      await downloadBtn.click();
-      await settleFlowUi();
-      const download = await downloadPromise;
-      if (download) {
-        const saved = await saveFlowDownload(download, outputPath, job.mode, log);
-        if (saved) {
-          log(`saved fallback download to ${outputPath}`);
-          return saved;
+        const download = await downloadPromise;
+        if (download) {
+          const saved = await saveFlowDownload(download, outputPath, job.mode, log);
+          if (saved) {
+            log(`saved fallback download to ${outputPath}`);
+            return saved;
+          }
         }
       }
     }
@@ -1739,7 +1934,7 @@ export const runGoogleFlowJob = createExclusiveQueue(async (options: FlowRunOpti
   } finally {
     lastFlowJobCompletedAt = Date.now();
     page.off('response', onResponse);
-    if (browser) {
+    if (browser && typeof browser.close === 'function') {
       await browser.close().catch(() => {});
     }
   }

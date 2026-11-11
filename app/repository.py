@@ -196,6 +196,11 @@ class StudioRepository:
         with self._connection() as conn:
             return self._episode_row(conn.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone())
 
+    def delete_episode(self, episode_id: str) -> bool:
+        with self._connection() as conn:
+            cursor = conn.execute("DELETE FROM episodes WHERE id = ?", (episode_id,))
+            return cursor.rowcount > 0
+
     def get_project_episode(self, project_id: str, episode_id: str) -> dict[str, Any] | None:
         with self._connection() as conn:
             return self._episode_row(conn.execute("SELECT * FROM episodes WHERE id = ? AND project_id = ?", (episode_id, project_id)).fetchone())

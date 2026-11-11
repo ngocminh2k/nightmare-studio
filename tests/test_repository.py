@@ -110,3 +110,15 @@ def test_record_only_review_gate_does_not_move_the_episode(tmp_path):
     repo.add_review(episode["id"], gate="source", decision="changes_requested", note="Not ours")
 
     assert repo.get_episode(episode["id"])["status"] == EpisodeStatus.DISCOVERED.value
+
+
+def test_delete_episode_cascades_and_removes_record(tmp_path):
+    repo = StudioRepository(tmp_path / "studio.db")
+    project = repo.create_project(name="Victor Kane", description="")
+    episode = repo.create_episode(project["id"], "A house that listens", "", "")
+    assert repo.get_episode(episode["id"]) is not None
+
+    deleted = repo.delete_episode(episode["id"])
+    assert deleted is True
+    assert repo.get_episode(episode["id"]) is None
+    assert repo.delete_episode(episode["id"]) is False

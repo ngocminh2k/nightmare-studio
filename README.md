@@ -74,6 +74,18 @@ Or launch the same live-CDP configuration reproducibly with `powershell -Executi
 
 The app writes uploaded images and generated clips under `outputs/<episode>/`, and surfaces each scene's final Veo prompt in the workspace. If CDP, Flow, or a selector is unavailable, the video job fails visibly without recording a fake artifact.
 
+### Switching Google Flow accounts
+
+Flow renders with one Google account at a time: one ungoogled-chromium instance on its own profile, one Flow project UUID. `scripts/switch-account.ps1` swaps both and clears the FlowKit hold that belongs to the old account.
+
+```powershell
+.\scripts\switch-account.ps1 -List                              # registry + live FlowKit status
+.\scripts\switch-account.ps1 -Account 2                         # switch to account 2
+.\scripts\switch-account.ps1 -Account 2 -ProjectId "<uuid>"     # switch and register a known UUID
+```
+
+Each account uses the Chromium profile `F:\truyen_ma\chrome-profiles\account-NN`, so sign in to Google in the window that opens; your normal Chrome is never touched. A Flow project belongs to the account that created it, so an account with no project yet gets one created through the extension — no manual UUID copy. The script then lifts the FlowKit hold left by the old account, verifies the account can run a real Flow RPC against that project, marks the account active in `data/flow-accounts.json` (which the media provider reads per request), and restarts the render pipeline, which resumes the episode and skips finished clips.
+
 ## Verify
 
 ```powershell

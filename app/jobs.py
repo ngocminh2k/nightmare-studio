@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -11,15 +13,24 @@ from export_csv import write_image_prompt_csv
 
 from .audio import AudioProvider, configured_audio_provider
 from .domain import EpisodeStatus
-from .media import DeterministicMediaProvider, MediaProvider, build_motion_prompt, build_victor_kane_image_prompt
+from .media import (
+    DeterministicMediaProvider,
+    MediaProvider,
+    build_motion_prompt,
+    build_victor_kane_image_prompt,
+    generate_veo_prompt_plan,
+    veo_video_prompt_messages,
+)
 from .nanobanana_prompt_rules import NANOBANANA_IMAGE_RULES, NANOBANANA_NEGATIVE_PROMPT
 from .providers import DeterministicLLMProvider, LLMProvider
 from .repository import StudioRepository
 from .systemone import (
+    DeterministicSystemOneClient,
     SystemOneClient,
     calculate_shot_duration,
     classify_shot_type,
     decide_scene_transition,
+    evaluate_scene_director,
 )
 
 BEAT_EXTRACTION_INSTRUCTION = (
@@ -28,10 +39,11 @@ BEAT_EXTRACTION_INSTRUCTION = (
 )
 SOURCE_BEAT_CHUNK_CHARS = 4000
 
-# The two-phase LLM storyboard flow issues one completion per script. A full-length draft
-# (~5,000 words) already exceeds a router model's reliable table-output window; cap the
-# LLM path at a length that finishes in a reasonable latency and fall back beyond it.
-STORYBOARD_LLM_MAX_SCRIPT_CHARS = 8000
+# Every scene becomes one clip, so the scene count decides the episode's running time.
+# The split points are ours, not the model's: leaving the count to the LLM is what
+# produced one-minute episodes. The LLM only dresses each pre-split scene.
+STORYBOARD_WORDS_PER_SCENE = 16
+STORYBOARD_LLM_BATCH_SCENES = 16
 
 
 def extract_source_beats(source: str, llm_provider: LLMProvider, chunk_chars: int = SOURCE_BEAT_CHUNK_CHARS) -> str:
@@ -73,12 +85,38 @@ def supervise_draft(draft: str, llm_provider: LLMProvider) -> str:
     return notes[:1200]
 
 
+def _target_word_count() -> int:
+    """The narration length the episode needs. 2,500 words at 16 words per scene is ~120 clips."""
+    raw = os.environ.get("NIGHTMARE_SCRIPT_TARGET_WORDS", "").strip().replace(",", "") or "2500"
+    try:
+        return max(600, int(float(raw)))
+    except ValueError:
+        return 2500
+
+
+def _expansion_prompt(draft: str, target_words: int) -> str:
+    """Ask the model to grow a short draft without changing its events or voice."""
+    return (
+        f"The horror narration below is {len(draft.split()):,} words. Expand it to roughly {target_words:,} words.\n"
+        "Keep every existing event, in the same order, in the same first-person Victor Kane voice. "
+        "Deepen sensory detail, extend the investigation, add natural dialogue with the people in it, and slow the "
+        "pacing — but do not add a new ending or resolve the threat.\n\n"
+        f"{draft}"
+    )
+
+
 def build_legacy_narrative_prompt(*, title: str, source: str, editorial_direction: str) -> str:
     """Build the long-form Victor Kane narration brief used by the former pipeline."""
+    target_words = _target_word_count()
+    word_target_phrase = (
+        f"at roughly {target_words:,} words — never shorter than {int(target_words * 0.9):,} words. "
+        "The source is only the opening incident: expand it into a full episode by deepening the investigation, "
+        "the people in it, and the slow escalation."
+    )
     return (
         "Rewrite the source into a long-form horror narrative for THE VICTOR KANE CHRONICLES. "
         "This is not a screenplay, scene list, outline, or production document. Return only finished prose.\n"
-        "Write in English, in Victor Kane's first-person voice, at roughly 5,000-7,000 words.\n\n"
+        f"Write in English, in Victor Kane's first-person voice, {word_target_phrase}.\n\n"
         "Victor is poised, observant, affluent, and unsettlingly composed. His narration is literary, precise, "
         "dry, darkly humorous, and morally cold without becoming cartoonish. He notices posture, small social "
         "failures, institutional cowardice, and sensory details before naming the supernatural. He does not panic, "
@@ -156,6 +194,22 @@ def apply_director_pacing(
     scene_weights = [max(1, len(re.findall(r"\S+", str(scene.get("narration") or "")))) for scene in scenes]
     weight_total = sum(scene_weights) or 1
 
+    director_decisions: dict[int, tuple[float, str, str]] = {}
+    if client is not None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _eval_scene(idx_scene: tuple[int, dict[str, Any]]) -> tuple[int, float, str, str]:
+            i, sc = idx_scene
+            narr = str(sc.get("narration") or "")
+            next_narr = str(scenes[i + 1].get("narration") or "") if i + 1 < len(scenes) else ""
+            dur, stype, trans = evaluate_scene_director(client, narr, next_narr)
+            return i, dur, stype, trans
+
+        workers = min(12, max(1, len(scenes)))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            for idx, dur, stype, trans in pool.map(_eval_scene, enumerate(scenes)):
+                director_decisions[idx] = (dur, stype, trans)
+
     for index, (scene, weight) in enumerate(zip(scenes, scene_weights)):
         narration = str(scene.get("narration") or "")
         try:
@@ -169,21 +223,32 @@ def apply_director_pacing(
 
         if directed_target is not None:
             target = directed_target
-        elif client is not None:
-            target = calculate_shot_duration(client, narration)
+        elif client is not None and index in director_decisions:
+            target = director_decisions[index][0]
         else:
             target = visual_budget * weight / weight_total
 
+        target = min(8.0, max(4.0, target))
+        # The voiceover must fit the clip it is muxed into: never cut narration short.
+        target = max(target, len(narration.split()) / 2.5)
         target = min(8.0, max(4.0, target))
         scene["target_duration_seconds"] = round(target, 2)
         scene["script_duration_seconds"] = round(script_duration, 2)
         scene["visual_duration_budget_seconds"] = round(visual_budget, 2)
         scene["motion_prompt"] = build_motion_prompt(scene)
 
-        if client is not None:
+        if client is not None and index in director_decisions:
+            scene["shot_type"] = director_decisions[index][1]
+            scene["transition"] = director_decisions[index][2]
+        elif client is not None:
             scene["shot_type"] = classify_shot_type(client, narration)
             next_narration = str(scenes[index + 1].get("narration") or "") if index + 1 < len(scenes) else ""
             scene["transition"] = decide_scene_transition(client, narration, next_narration)
+        else:
+            # Offline fallback: the framing decision still has to be made, because it is
+            # what tells the prompt builder whether the protagonist is in frame.
+            scene["shot_type"] = classify_shot_type(DeterministicSystemOneClient(), narration)
+            scene["transition"] = "cut"
 
     return scenes
 
@@ -291,7 +356,8 @@ class JobRunner:
         brand_bible = (project or {}).get("brand_bible", "").strip()
         self.repository.update_job(job["id"], progress=35)
         title = episode["title"].strip() or "Untitled Incident"
-        if len(source) > SOURCE_BEAT_CHUNK_CHARS:
+        beat_threshold = int(os.environ.get("NIGHTMARE_BEAT_EXTRACTION_THRESHOLD", str(SOURCE_BEAT_CHUNK_CHARS)))
+        if len(source) > beat_threshold:
             source = extract_source_beats(source, self.llm_provider)
             self.repository.add_activity(episode["id"], "rewrite", "Compressed the long source into tension beats before rewriting")
         prompt = build_legacy_narrative_prompt(
@@ -300,6 +366,17 @@ class JobRunner:
             editorial_direction=brand_bible or "Grounded first-person horror with restrained dread.",
         )
         draft = self.llm_provider.generate([{"role": "user", "content": prompt}])
+        # The model consistently under-delivers the requested length, and a short draft
+        # becomes a short episode. Expand it until it reaches the length the run needs.
+        target_words = _target_word_count()
+        for attempt in range(1, 4):
+            if len(draft.split()) >= target_words * 0.9:
+                break
+            self.repository.add_activity(
+                episode["id"], "rewrite",
+                f"Expanding draft to reach {target_words} words (attempt {attempt}, currently {len(draft.split())})",
+            )
+            draft = self.llm_provider.generate([{"role": "user", "content": _expansion_prompt(draft, target_words)}])
         if episode["status"] != EpisodeStatus.REWRITTEN.value:
             self.repository.transition_episode(episode["id"], EpisodeStatus.REWRITTEN, note="Rewrite draft generated")
         updated = self.repository.update_episode(episode["id"], script_draft=draft, cost_total=float(episode["cost_total"]) + 0.02)
@@ -334,15 +411,15 @@ class JobRunner:
             self.repository.update_episode(episode["id"], storyboard=scenes)
         output_dir = self.repository.database_path.parent / "outputs" / episode["id"]
         csv_path = write_image_prompt_csv(output_dir / "image_prompts.csv", scenes)
-        if not all(scene.get("motion_prompt_plan_version") == 1 for scene in scenes):
-            # A motion brief is derived from the approved storyboard before any image exists.
-            # The LLM is intentionally reserved for the final editorial script after video upload.
-            prompts = {int(scene["number"]): build_motion_prompt(scene) for scene in scenes}
+        if not all(scene.get("motion_prompt_plan_version") == 3 for scene in scenes):
+            prompts = generate_veo_prompt_plan(scenes, self.llm_provider)
             for scene in scenes:
-                scene["motion_prompt"] = prompts[int(scene["number"])]
-                scene["motion_prompt_plan_version"] = 1
+                num = int(scene["number"])
+                if num in prompts:
+                    scene["motion_prompt"] = prompts[num]
+                    scene["motion_prompt_plan_version"] = 3
             self.repository.update_episode(episode["id"], storyboard=scenes)
-            self.repository.add_activity(episode["id"], "assets", "Prepared all Veo 3.1 prompts from the approved storyboard before media upload")
+            self.repository.add_activity(episode["id"], "assets", f"Generated FlowKit multi-shot motion prompt plan for {len(scenes)} scene(s) via LLM")
         uploaded = [scene for scene in scenes if Path(str(scene.get("asset_path") or "")).is_file()]
         if len(uploaded) != len(scenes):
             self.repository.add_activity(episode["id"], "assets", f"Exported image CSV; awaiting {len(scenes) - len(uploaded)} scene upload(s)")
@@ -371,8 +448,57 @@ class JobRunner:
             raise ValueError("Upload every numbered scene video before final assembly")
         source_durations = {number: clip_duration_seconds(clip) for number, clip in clips_by_scene.items()}
         target_durations = {int(scene["number"]): float(scene.get("target_duration_seconds") or 5) for scene in scenes}
-        edit_request = "Execute the pre-directed pacing plan. Return JSON only: {\"edl\":[{\"scene_number\":1,\"start_seconds\":0,\"end_seconds\":4.25,\"playback_rate\":0.85,\"transition\":\"cut\"}]}. Include every scene exactly once; only use cut transitions; playback_rate must be 0.5 to 1.7; never exceed the source duration; and rendered duration (end-start)/playback_rate must not exceed target_duration_seconds, which is always at most 5 seconds.\n\n" + json.dumps([{"scene_number": scene["number"], "source_duration_seconds": source_durations[int(scene["number"])], "target_duration_seconds": target_durations[int(scene["number"])], "narration": scene.get("narration"), "shot": scene.get("shot")} for scene in scenes], ensure_ascii=False)
-        plan = parse_edit_decision_list(self.llm_provider.generate([{"role": "user", "content": edit_request}]), source_durations)
+        narration_durations = {
+            int(scene["number"]): float(scene.get("audio_duration_seconds") or 0)
+            for scene in scenes
+            if scene.get("audio_duration_seconds")
+        }
+        edit_request = "Execute the pre-directed pacing plan. Return JSON only: {\"edl\":[{\"scene_number\":1,\"start_seconds\":0,\"end_seconds\":4.25,\"playback_rate\":0.85,\"transition\":\"cut\"}]}. Include every scene exactly once; only use cut transitions; playback_rate must be 0.5 to 1.7; never exceed the source duration; and rendered duration (end-start)/playback_rate must not exceed target_duration_seconds.\n\n" + json.dumps([{"scene_number": scene["number"], "source_duration_seconds": source_durations[int(scene["number"])], "target_duration_seconds": target_durations[int(scene["number"])], "narration": scene.get("narration"), "shot": scene.get("shot")} for scene in scenes], ensure_ascii=False)
+        try:
+            plan = parse_edit_decision_list(self.llm_provider.generate([{"role": "user", "content": edit_request}]), source_durations)
+        except Exception:
+            # Deterministic pacing fallback: trim or conform playback rate to target duration
+            plan = []
+            for scene in scenes:
+                num = int(scene["number"])
+                src_d = source_durations.get(num, 6.0)
+                tgt_d = target_durations.get(num, 5.0)
+                if src_d >= tgt_d:
+                    plan.append({
+                        "scene_number": num,
+                        "start_seconds": 0.0,
+                        "end_seconds": round(tgt_d, 2),
+                        "playback_rate": 1.0,
+                        "transition": "cut",
+                    })
+                else:
+                    rate = max(0.6, min(1.5, round(src_d / max(0.1, tgt_d), 2)))
+                    plan.append({
+                        "scene_number": num,
+                        "start_seconds": 0.0,
+                        "end_seconds": round(src_d, 2),
+                        "playback_rate": rate,
+                        "transition": "cut",
+                    })
+        # A scene's narration is the pacing authority: cut it whole and at natural
+        # speed, so an editorial retime can never slice a line mid-sentence.
+        for item in plan:
+            num = item["scene_number"]
+            narration_dur = narration_durations.get(num)
+            if not narration_dur:
+                continue
+            item["start_seconds"] = 0.0
+            item["end_seconds"] = round(min(source_durations[num], narration_dur), 3)
+            item["playback_rate"] = 1.0
+
+        # Absorb minor LLM/rounding pacing noise (<= 0.5s) to conform strictly to target duration
+        for item in plan:
+            num = item["scene_number"]
+            tgt = target_durations[num]
+            excess = rendered_seconds(item) - tgt
+            if 0 < excess <= 0.5:
+                item["end_seconds"] = min(item["end_seconds"], item["start_seconds"] + (tgt * item["playback_rate"]) - 1e-4)
+
         if any(rendered_seconds(item) > target_durations[item["scene_number"]] + _EDL_EPSILON for item in plan):
             raise ValueError("Edit decision list exceeds a scene's pre-directed target duration")
         output_dir = self.repository.database_path.parent / "outputs" / episode["id"]
@@ -384,12 +510,39 @@ class JobRunner:
             raise RuntimeError("FFmpeg is required for final assembly but was not found on PATH")
         final_video = output_dir / "final_no_voiceover.mp4"
         inputs = [clips_by_scene[item["scene_number"]] for item in plan]
-        filters = build_assemble_filters(plan, [clip_has_audio(clip) for clip in inputs])
-        filters.append("".join(f"[v{index}][a{index}]" for index in range(len(plan))) + f"concat=n={len(plan)}:v=1:a=1[edited_video][edited_audio]")
-        command = [ffmpeg, "-y"] + [argument for clip in inputs for argument in ("-i", str(clip))] + ["-filter_complex", ";".join(filters), "-map", "[edited_video]", "-map", "[edited_audio]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final_video)]
-        completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
-        if completed.returncode != 0 or not final_video.is_file():
-            raise RuntimeError(f"FFmpeg assembly failed: {completed.stderr[-1000:]}")
+
+        if len(plan) <= 30:
+            filters = build_assemble_filters(plan, [clip_has_audio(clip) for clip in inputs])
+            filters.append("".join(f"[v{index}][a{index}]" for index in range(len(plan))) + f"concat=n={len(plan)}:v=1:a=1[edited_video][edited_audio]")
+            command = [ffmpeg, "-y"] + [argument for clip in inputs for argument in ("-i", str(clip))] + ["-filter_complex", ";".join(filters), "-map", "[edited_video]", "-map", "[edited_audio]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final_video)]
+            completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+            if completed.returncode != 0 or not final_video.is_file():
+                raise RuntimeError(f"FFmpeg assembly failed: {completed.stderr[-1000:]}")
+        else:
+            # Chunked assembly for large scene counts to avoid OS command-line length limits
+            chunk_size = 25
+            chunk_files: list[Path] = []
+            for chunk_idx in range(0, len(plan), chunk_size):
+                chunk_plan = plan[chunk_idx : chunk_idx + chunk_size]
+                chunk_inputs = [clips_by_scene[item["scene_number"]] for item in chunk_plan]
+                chunk_video = output_dir / f"assembly_chunk_{chunk_idx // chunk_size:03d}.mp4"
+                c_filters = build_assemble_filters(chunk_plan, [clip_has_audio(c) for c in chunk_inputs])
+                c_filters.append("".join(f"[v{i}][a{i}]" for i in range(len(chunk_plan))) + f"concat=n={len(chunk_plan)}:v=1:a=1[c_vid][c_aud]")
+                c_cmd = [ffmpeg, "-y"] + [arg for c in chunk_inputs for arg in ("-i", str(c))] + ["-filter_complex", ";".join(c_filters), "-map", "[c_vid]", "-map", "[c_aud]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(chunk_video)]
+                c_run = subprocess.run(c_cmd, capture_output=True, text=True, timeout=1800)
+                if c_run.returncode != 0 or not chunk_video.is_file():
+                    raise RuntimeError(f"FFmpeg chunk assembly failed (chunk {chunk_idx}): {c_run.stderr[-1000:]}")
+                chunk_files.append(chunk_video)
+
+            # Concat the chunk files
+            concat_filters = ["".join(f"[{i}:v][{i}:a]" for i in range(len(chunk_files))) + f"concat=n={len(chunk_files)}:v=1:a=1[v][a]"]
+            merge_cmd = [ffmpeg, "-y"] + [arg for cf in chunk_files for arg in ("-i", str(cf))] + ["-filter_complex", ";".join(concat_filters), "-map", "[v]", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-movflags", "+faststart", str(final_video)]
+            completed = subprocess.run(merge_cmd, capture_output=True, text=True, timeout=1800)
+            if completed.returncode != 0 or not final_video.is_file():
+                merge_cmd = [ffmpeg, "-y"] + [arg for cf in chunk_files for arg in ("-i", str(cf))] + ["-filter_complex", ";".join(concat_filters), "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final_video)]
+                completed = subprocess.run(merge_cmd, capture_output=True, text=True, timeout=1800)
+                if completed.returncode != 0 or not final_video.is_file():
+                    raise RuntimeError(f"FFmpeg chunk merge failed: {completed.stderr[-1000:]}")
         self.repository.update_episode(episode["id"], output_path=str(final_video))
         if episode["status"] != EpisodeStatus.AWAITING_FINAL_REVIEW.value:
             self.repository.transition_episode(episode["id"], EpisodeStatus.VIDEO_READY, note="Rendered user-uploaded clips with FFmpeg; original clip audio preserved")
@@ -406,6 +559,24 @@ class JobRunner:
         audio_dir = output_dir / "audio"
         audio_dir.mkdir(parents=True, exist_ok=True)
 
+        # Whole-episode continuous audio generation
+        script = (episode.get("script_final") or episode.get("script_draft") or "").strip()
+        if not script and scenes:
+            script = " ".join(str(s.get("narration") or "").strip() for s in scenes if s.get("narration"))
+
+        master_audio = output_dir / "full_voiceover.mp3"
+        voice = getattr(getattr(self.audio_provider, "settings", None), "default_voice", "mrkane")
+
+        if script:
+            if not (master_audio.is_file() and master_audio.stat().st_size > 1000):
+                self.audio_provider.generate_speech(script, master_audio, voice=voice)
+            try:
+                master_duration = clip_duration_seconds(master_audio)
+            except Exception:
+                master_duration = max(1.0, round(len(script.split()) / 2.5, 2))
+        else:
+            master_duration = 0.0
+
         clips: list[dict[str, Any]] = []
         total_duration = 0.0
 
@@ -415,8 +586,9 @@ class JobRunner:
             audio_file = audio_dir / f"scene-{num:03d}.mp3"
 
             if narration:
-                voice = str(scene.get("voice") or getattr(getattr(self.audio_provider, "settings", None), "default_voice", "mrkane"))
-                self.audio_provider.generate_speech(narration, audio_file, voice=voice)
+                scene_voice = str(scene.get("voice") or voice)
+                if not (audio_file.is_file() and audio_file.stat().st_size > 1000):
+                    self.audio_provider.generate_speech(narration, audio_file, voice=scene_voice)
                 try:
                     dur = clip_duration_seconds(audio_file)
                 except Exception:
@@ -434,6 +606,7 @@ class JobRunner:
                 "duration_seconds": dur,
                 "narration": narration,
             })
+            self.repository.update_episode(episode["id"], storyboard=scenes)
 
         self.repository.update_episode(episode["id"], storyboard=scenes, output_path=f"outputs/{episode['id']}")
 
@@ -441,6 +614,7 @@ class JobRunner:
         manifest_data = {
             "episode_id": episode["id"],
             "provider": getattr(self.audio_provider, "name", "custom"),
+            "master_audio_path": str(master_audio),
             "clips": clips,
             "total_duration_seconds": total_duration,
         }
@@ -453,6 +627,7 @@ class JobRunner:
         )
         return {
             "audio_manifest": str(manifest_path),
+            "master_audio_path": str(master_audio),
             "clip_count": len(clips),
             "total_duration_seconds": total_duration,
             "provider": getattr(self.audio_provider, "name", "custom"),
@@ -463,20 +638,82 @@ class JobRunner:
         if episode["status"] != EpisodeStatus.AUDIO_READY.value:
             raise ValueError("Video rendering requires ready audio")
         scenes = episode["storyboard"]
-        clips: list[dict[str, str | int]] = []
-        for scene in scenes:
+        concurrency = int(os.getenv("NIGHTMARE_VIDEO_CONCURRENCY", "2"))
+        concurrency = max(1, min(concurrency, 6))
+
+        def _calc_duration_s(target_dur: float | None) -> int:
+            if target_dur is None or target_dur <= 0:
+                return 8
+            if target_dur <= 4.2:
+                return 4
+            if target_dur <= 6.2:
+                return 6
+            if target_dur <= 8.2:
+                return 8
+            return 10
+
+        def _process_single_scene(scene: dict[str, Any]) -> dict[str, Any]:
             image_path = Path(str(scene.get("asset_path", "")))
             if not image_path.is_file():
                 raise ValueError(f"Scene {scene['number']} has no local generated image")
-            motion_prompt = str(scene.get("motion_prompt") or build_motion_prompt(scene))
+            motion_prompt = str(scene.get("motion_prompt") or "")
+            if not motion_prompt or scene.get("motion_prompt_plan_version", 0) < 3:
+                try:
+                    single_msgs = veo_video_prompt_messages(scene)
+                    raw_single = self.llm_provider.generate(single_msgs)
+                    clean_p = raw_single.strip().removeprefix("```text").removeprefix("```").removesuffix("```").strip()
+                    if "\n\n" in clean_p and ("→" in clean_p or "skipped:" in clean_p):
+                        clean_p = clean_p.split("\n\n")[0].strip()
+                    motion_prompt = clean_p
+                    scene["motion_prompt"] = motion_prompt
+                    scene["motion_prompt_plan_version"] = 3
+                except Exception:
+                    motion_prompt = build_motion_prompt(scene)
             video_path = self._artifact_path(episode["id"], "clips", scene["number"], ".mp4")
             if video_path.is_file() and video_path.stat().st_size > 0:
                 generated = video_path
             else:
-                generated = self.media_provider.generate_video(image_path, motion_prompt, video_path)
+                target_dur = float(scene.get("target_duration_seconds") or 0)
+                dur_s = _calc_duration_s(target_dur)
+                print(f"   [Video Gen] Rendering Scene {scene['number']}/{len(scenes)} ({dur_s}s)...", flush=True)
+                last_exc: Exception | None = None
+                for attempt in range(1, 4):
+                    try:
+                        try:
+                            generated = self.media_provider.generate_video(
+                                image_path, motion_prompt, video_path, duration_s=dur_s
+                            )
+                        except TypeError:
+                            generated = self.media_provider.generate_video(
+                                image_path, motion_prompt, video_path
+                            )
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        if video_path.is_file():
+                            try:
+                                video_path.unlink()
+                            except Exception:
+                                pass
+                        time.sleep(5)
+                else:
+                    if last_exc:
+                        raise last_exc
             scene["motion_prompt"] = motion_prompt
             scene["video_path"] = str(generated)
-            clips.append({"scene_number": scene["number"], "path": str(generated), "motion_prompt": motion_prompt})
+            return {"scene_number": scene["number"], "path": str(generated), "motion_prompt": motion_prompt}
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        clips: list[dict[str, str | int]] = []
+        if concurrency > 1 and len(scenes) > 1:
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                clips = list(pool.map(_process_single_scene, scenes))
+        else:
+            for scene in scenes:
+                clips.append(_process_single_scene(scene))
+                self.repository.update_episode(episode["id"], storyboard=scenes)
+
         self.repository.update_episode(episode["id"], storyboard=scenes)
         manifest_path = self.repository.database_path.parent / "outputs" / episode["id"] / "video_manifest.json"
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -513,37 +750,121 @@ def _markdown_rows(markdown: str, expected_columns: int) -> list[list[str]]:
     return rows
 
 
-def _fallback_storyboard_scenes(script: str, client: SystemOneClient | None = None) -> list[dict[str, Any]]:
-    """Create a 48-shot plan for full-length scripts, matching the legacy pipeline's cadence."""
-
+def _segment_script_sentences(script: str, target_words: int = 16) -> list[str]:
+    """Segment script into natural visual shots without truncation or dropped text."""
     words = re.findall(r"\S+", script)
     if not words:
         return []
-    scene_count = 48 if len(words) >= 600 else min(48, max(1, (len(words) + 24) // 25))
+    raw_sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", script) if s.strip()]
+    chunks: list[str] = []
+    current: list[str] = []
+    current_words = 0
+
+    for sentence in raw_sentences:
+        s_words = sentence.split()
+        if len(s_words) > 28:
+            if current:
+                chunks.append(" ".join(current))
+                current = []
+                current_words = 0
+            for i in range(0, len(s_words), target_words):
+                chunks.append(" ".join(s_words[i:i + target_words]))
+            continue
+
+        w_count = len(s_words)
+        if current_words > 0 and (current_words + w_count) > target_words * 1.5:
+            chunks.append(" ".join(current))
+            current = [sentence]
+            current_words = w_count
+        else:
+            current.append(sentence)
+            current_words += w_count
+            if current_words >= target_words:
+                chunks.append(" ".join(current))
+                current = []
+                current_words = 0
+
+    if current:
+        if chunks and current_words < 6:
+            chunks[-1] += " " + " ".join(current)
+        else:
+            chunks.append(" ".join(current))
+
+    return chunks
+
+
+# Camera framing wording per SystemOne shot type. Framing decides whether the
+# protagonist is in frame, so it must be settled before the image prompt is built.
+_SHOT_BY_TYPE = {
+    "close_up_detail": "Close-up detail shot",
+    "wide_establishing": "Wide establishing shot",
+    "character_portrait": "Character portrait shot",
+}
+
+
+def _fallback_storyboard_scenes(script: str, client: SystemOneClient | None = None) -> list[dict[str, Any]]:
+    """Create complete-sentence storyboard scenes matching 4s-8s SystemOne visual pacing."""
+    chunks = _segment_script_sentences(script)
+    if not chunks:
+        return []
+
     scenes: list[dict[str, Any]] = []
-    for index in range(scene_count):
-        start = index * len(words) // scene_count
-        end = (index + 1) * len(words) // scene_count
-        chunk_text = " ".join(words[start:end])
-        sentences = re.split(r"(?<=[.!?])\s+", chunk_text)
-        lead = sentences[0].strip() if sentences else chunk_text
-        lead_words = lead.split()
-        if len(lead_words) > 22:
-            lead = " ".join(lead_words[:20]) + "..."
-        narration = lead or chunk_text
-        shot = "Medium close-up" if index % 2 == 0 else "Wide establishing shot"
-        scene = {
+    for index, chunk_text in enumerate(chunks):
+        scenes.append({
             "number": index + 1,
-            "narration": narration,
+            "narration": chunk_text,
             "story_beat": chunk_text,
-            "shot": shot,
-            "prompt": build_victor_kane_image_prompt({"shot": shot, "narration": narration, "story_beat": chunk_text}),
             "negative_prompt": NANOBANANA_NEGATIVE_PROMPT,
             "asset_status": "pending",
-        }
+        })
+
+    # Pace first: the director's shot_type is what tells the prompt builder whether
+    # the protagonist is on screen. Building the prompt earlier forced him into every frame.
+    scenes = apply_director_pacing(scenes, script, client=client)
+    for scene in scenes:
+        shot = _SHOT_BY_TYPE.get(str(scene.get("shot_type") or ""), "Cinematic horror medium shot")
+        scene["shot"] = shot
+        scene["prompt"] = build_victor_kane_image_prompt(scene)
         scene["motion_prompt"] = build_motion_prompt(scene)
-        scenes.append(scene)
-    return apply_director_pacing(scenes, script, client=client)
+    return scenes
+
+
+def _describe_scenes(scene_texts: list[str], llm_provider: LLMProvider) -> dict[int, str]:
+    """Ask the LLM for one visual description per pre-split scene.
+
+    The scene split is decided before the LLM is called, so the model only dresses
+    scenes that already exist. It returns a table keyed by scene number.
+    """
+    instruction = (
+        "You are a professional storyboard director. For each numbered scene below, write one Scene Visual "
+        "Description of 120-180 characters describing exactly what the camera sees: the subject's visible age, "
+        "build, clothing, expression, and physical action, plus the environment around them. "
+        "BEAT RULE: Embed [BEAT:horror|dread|shock|revelation|memory|violence|tension|eerie|action] in each description. "
+        "Describe each scene's mood in English without proper names. "
+        "Return one row per scene and nothing else: | Scene | Scene Visual Description |\n|---|---|\n\n"
+        f"{NANOBANANA_IMAGE_RULES}"
+    )
+    descriptions: dict[int, str] = {}
+    for start in range(0, len(scene_texts), STORYBOARD_LLM_BATCH_SCENES):
+        batch = scene_texts[start:start + STORYBOARD_LLM_BATCH_SCENES]
+        body = "\n".join(f"{start + offset + 1}. {text}" for offset, text in enumerate(batch))
+        rows = _markdown_rows(
+            llm_provider.generate(
+                [
+                    {"role": "system", "content": instruction},
+                    {"role": "user", "content": body},
+                ]
+            ),
+            2,
+        )
+        for row in rows:
+            digits = re.sub(r"[^0-9]", "", row[0])
+            if not digits or not row[1]:
+                continue
+            index = int(digits) - 1
+            if 0 <= index < len(batch):
+                descriptions[start + index + 1] = row[1]
+    return descriptions
 
 
 def build_storyboard_scenes(
@@ -551,46 +872,40 @@ def build_storyboard_scenes(
     llm_provider: LLMProvider | None = None,
     client: SystemOneClient | None = None,
 ) -> list[dict[str, Any]]:
-    """Use the configured legacy scene-table and 1:1 image-prompt stages when an LLM is available."""
+    """Use the configured legacy scene-table stage when an LLM is available."""
     if not script.strip() or not llm_provider or isinstance(llm_provider, DeterministicLLMProvider):
         return _fallback_storyboard_scenes(script, client=client)
-    if len(script) > STORYBOARD_LLM_MAX_SCRIPT_CHARS:
-        # The legacy draft is ~5,000 words. Asking a router model to emit a 100+-row scene
-        # table in one completion stalls on output tokens; use the deterministic 48-shot plan
-        # instead so production never hangs on a single oversized prompt.
-        # ponytail: feed the script to the scene splitter in beat-sized chunks and renumber.
+
+    # The scene count is ours. Every scene becomes one clip, so letting the model choose
+    # the split is what produced one-minute episodes from a full-length script.
+    scene_texts = _segment_script_sentences(script, STORYBOARD_WORDS_PER_SCENE)
+    if not scene_texts:
         return _fallback_storyboard_scenes(script, client=client)
-    scene_instruction = (
-        "You are a professional storyboard director. Split the literary script into visual scenes of 250-350 characters. "
-        "Do not fix the scene count; follow the story rhythm. Direct a target screen time from 0.8 to 5.0 seconds for each scene: linger for dread, shorten reveals, and never exceed five seconds. "
-        "Describe each scene's mood in English without proper names. Return only: | STT Scene | Starting Sentence | Scene Visual Description | Target Screen Seconds |\n|---|---|---|---|"
-    )
-    image_instruction = (
-        "Create a Stable Diffusion Prompt and Negative Prompt for every supplied scene row. 1:1 ROW MAPPING is mandatory. "
-        "Return only: | Stable Diffusion Prompt | Negative Prompt |\n|---|---|. Positive prompts must describe subject/action, "
-        "mood-appropriate composition, lighting, environment, and color palette in 20-50 English words; do not rely on proper names.\n\n"
-        f"{NANOBANANA_IMAGE_RULES}"
-    )
+
     try:
-        scene_rows = _markdown_rows(
-            llm_provider.generate([{"role": "system", "content": scene_instruction}, {"role": "user", "content": script}]), 4
-        )
-        scene_table = "| STT Scene | Starting Sentence | Scene Visual Description |\n|---|---|---|\n" + "\n".join(
-            f"| {' | '.join(row[:3])} |" for row in scene_rows
-        )
-        prompt_rows = _markdown_rows(
-            llm_provider.generate([{"role": "system", "content": image_instruction}, {"role": "user", "content": scene_table}]), 2
-        )
-        if not scene_rows or len(scene_rows) != len(prompt_rows):
-            raise ValueError("Storyboard prompt rows do not match scene rows")
-        scenes = []
-        for number, (scene_row, prompt_row) in enumerate(zip(scene_rows, prompt_rows), start=1):
-            scene = {"number": number, "narration": scene_row[1], "visual_description": scene_row[2], "target_duration_seconds": scene_row[3], "shot": "Storyboard-defined composition", "prompt": prompt_row[0], "negative_prompt": prompt_row[1], "asset_status": "pending"}
-            scene["motion_prompt"] = build_motion_prompt(scene)
-            scenes.append(scene)
-        return apply_director_pacing(scenes, script, client=client)
+        descriptions = _describe_scenes(scene_texts, llm_provider)
     except (ValueError, IndexError, RuntimeError):
-        # A provider outage (RuntimeError from RouterLLMProvider.generate) or malformed
-        # LLM output must not hard-fail the storyboard job: fall back to the deterministic
-        # 48-shot plan so the editorial pipeline keeps moving.
+        # A provider outage (RuntimeError from RouterLLMProvider.generate) must not hard-fail
+        # the storyboard job: fall back to the deterministic plan so the pipeline keeps moving.
         return _fallback_storyboard_scenes(script, client=client)
+
+    scenes = [
+        {
+            "number": index,
+            "narration": text,
+            "story_beat": text,
+            "visual_description": descriptions.get(index, ""),
+            "negative_prompt": NANOBANANA_NEGATIVE_PROMPT,
+            "asset_status": "pending",
+        }
+        for index, text in enumerate(scene_texts, start=1)
+    ]
+
+    # Pace first, then build the image prompt: the director's shot_type decides
+    # whether the protagonist is in frame, and the prompt builder must know it.
+    scenes = apply_director_pacing(scenes, script, client=client)
+    for scene in scenes:
+        scene["shot"] = _SHOT_BY_TYPE.get(str(scene.get("shot_type") or ""), "Cinematic horror medium shot")
+        scene["prompt"] = build_victor_kane_image_prompt(scene)
+        scene["motion_prompt"] = build_motion_prompt(scene)
+    return scenes

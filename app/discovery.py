@@ -21,6 +21,123 @@ class SourceStory:
     text: str
 
 
+class CamoufoxRedditSourceProvider:
+    """Fetches r/nosleep stories using Camoufox anti-detect browser with CDP fallback."""
+
+    def __init__(
+        self,
+        subreddit: str = "nosleep",
+        time_filter: str = "month",
+        sort: str = "top",
+        cdp_url: str = "http://127.0.0.1:9222",
+        timeout_seconds: int = 45,
+        browser_launcher: Callable[..., Any] | None = None,
+    ) -> None:
+        self.subreddit = subreddit
+        self.time_filter = time_filter
+        self.sort = sort
+        self.cdp_url = cdp_url
+        self.timeout_seconds = timeout_seconds
+        self._browser_launcher = browser_launcher
+
+    def _get_page(self, playwright: Any) -> tuple[Any, Any]:
+        """Acquire a page from Camoufox or fallback to Chrome CDP."""
+        if self._browser_launcher:
+            return self._browser_launcher(playwright)
+
+        # 1. Try Camoufox anti-detect browser
+        try:
+            from camoufox.sync_api import Camoufox
+            camoufox_cm = Camoufox(headless=True)
+            browser = camoufox_cm.__enter__()
+            page = browser.new_page()
+            return browser, page
+        except Exception:
+            pass
+
+        # 2. Fallback to existing Chrome over CDP
+        try:
+            browser = playwright.chromium.connect_over_cdp(self.cdp_url)
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            page = context.new_page()
+            return browser, page
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to launch Camoufox or connect to Chrome CDP at {self.cdp_url}: {exc}"
+            ) from exc
+
+    def scrape_post(self, url: str) -> SourceStory:
+        """Scrape full story text and title from a specific Reddit post URL."""
+        from playwright.sync_api import sync_playwright
+
+        with sync_playwright() as p:
+            browser, page = self._get_page(p)
+            try:
+                page.goto(url, timeout=self.timeout_seconds * 1000)
+                page.wait_for_load_state("domcontentloaded")
+                title = ""
+                for sel in ("h1", "h1[slot='title']", "a.title"):
+                    if page.locator(sel).count() > 0:
+                        title = page.locator(sel).first.inner_text().strip()
+                        if title:
+                            break
+
+                body = ""
+                for sel in (
+                    "div[id$='-post-rtjson-content']",
+                    "div.text-neutral-content",
+                    "div.usertext-body div.md",
+                    "div[data-click-id='text']",
+                ):
+                    if page.locator(sel).count() > 0:
+                        body = page.locator(sel).first.inner_text().strip()
+                        if body:
+                            break
+
+                if not title:
+                    title = page.title()
+                if not body:
+                    raise ValueError(f"Could not extract body text from Reddit post: {url}")
+
+                return SourceStory(title=title, url=url, text=body)
+            finally:
+                page.close()
+
+    def discover(self, existing_urls: set[str] | None = None) -> SourceStory:
+        """Discover and scrape the top uncrawled story from the subreddit."""
+        existing = existing_urls or set()
+        from playwright.sync_api import sync_playwright
+
+        listing_url = f"https://www.reddit.com/r/{self.subreddit}/{self.sort}/?t={self.time_filter}"
+        with sync_playwright() as p:
+            browser, page = self._get_page(p)
+            try:
+                page.goto(listing_url, timeout=self.timeout_seconds * 1000)
+                page.wait_for_load_state("domcontentloaded")
+                posts = page.eval_on_selector_all(
+                    "a[slot='full-post-link']",
+                    "els => els.map(e => ({title: e.innerText, href: e.href}))",
+                )
+                if not posts:
+                    posts = page.eval_on_selector_all(
+                        "a.title",
+                        "els => els.map(e => ({title: e.innerText, href: e.href}))",
+                    )
+            finally:
+                page.close()
+
+        for post in posts:
+            post_url = post.get("href", "")
+            if not post_url or post_url in existing:
+                continue
+            try:
+                return self.scrape_post(post_url)
+            except Exception:
+                continue
+
+        raise RuntimeError(f"No uncrawled story found in r/{self.subreddit}")
+
+
 class RedditSourceProvider:
     """Fetches an uncrawled r/nosleep story using the legacy Python endpoint."""
 
