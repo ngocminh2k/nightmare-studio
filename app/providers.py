@@ -64,7 +64,11 @@ class ProviderSettings:
         raw_model = os.environ.get("NIGHTMARE_LLM_MODEL", "").strip()
         model = raw_model if raw_model and raw_model != "mrkane" else "minh"
         raw_fallback = os.environ.get("NIGHTMARE_LLM_FALLBACK_MODEL", "").strip()
-        fallback = raw_fallback if raw_fallback and raw_fallback != "gemini/gemini-3-flash-preview" else "cl/google/gemini-3.8-flash"
+        fallback = (
+            raw_fallback
+            if raw_fallback and raw_fallback != "gemini/gemini-3-flash-preview"
+            else "cl/google/gemini-3.8-flash"
+        )
 
         return cls(
             openai_api_key=os.environ.get("NIGHTMARE_OPENAI_API_KEY", ""),
@@ -188,7 +192,9 @@ class RouterLLMProvider:
         headers = {"Content-Type": "application/json"}
         if self.settings.router_api_key and self.settings.router_send_auth:
             headers["Authorization"] = f"Bearer {self.settings.router_api_key}"
-        request = Request(f"{self.settings.router_base_url.rstrip('/')}/chat/completions", data=payload, headers=headers)
+        request = Request(
+            f"{self.settings.router_base_url.rstrip('/')}/chat/completions", data=payload, headers=headers
+        )
         with self._opener(request, timeout=self.settings.llm_timeout_seconds) as response:
             raw = response.read().decode("utf-8")
         return parse_chat_completion(raw)

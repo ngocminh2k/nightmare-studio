@@ -8,6 +8,7 @@ Flow:
 
 Does NOT auto-regenerate — CLI/MCP triggers that externally.
 """
+
 from __future__ import annotations
 
 import json
@@ -41,6 +42,7 @@ _STRONG_HOOK = re.compile(
 # ---------------------------------------------------------------------------
 # DB helpers — no StudioRepository import to avoid circular imports
 # ---------------------------------------------------------------------------
+
 
 def _load_episode(episode_id: str, db_path: Path) -> dict[str, Any] | None:
     if not db_path.exists():
@@ -76,6 +78,7 @@ def _load_assets(episode_id: str, db_path: Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Score dimensions (1–10 each, pure heuristics)
 # ---------------------------------------------------------------------------
+
 
 def _score_storytelling(narrations: list[str], story_beats: list[str]) -> tuple[float, str]:
     """Hook strength scene-1 + tension build + ending punch."""
@@ -143,7 +146,8 @@ def _score_prompt_quality(visual_descriptions: list[str], story_beats: list[str]
     has_style_lock = sum(1 for v in visual_descriptions if "STYLE LOCK" in v)
     has_subject = sum(1 for v in visual_descriptions if "matching reference image identity" in v or "Subject:" in v)
     has_beat_lighting = sum(
-        1 for v, b in zip(visual_descriptions, story_beats)
+        1
+        for v, b in zip(visual_descriptions, story_beats)
         if b in _BEAT_LIGHTING and _BEAT_LIGHTING[b][0][:20].lower() in v.lower()
     )
 
@@ -224,6 +228,7 @@ def _score_youtube_retention(narrations: list[str]) -> tuple[float, str]:
 # Episode data extraction
 # ---------------------------------------------------------------------------
 
+
 def _extract_eval_inputs(episode: dict[str, Any], assets: list[dict[str, Any]]) -> dict[str, Any]:
     """Pull narrations, beats, lighting, palette, visual_descriptions from storyboard + assets."""
     storyboard: list[dict[str, Any]] = episode.get("storyboard") or []
@@ -254,8 +259,7 @@ def _extract_eval_inputs(episode: dict[str, Any], assets: list[dict[str, Any]]) 
                 asset_prompts[int(sn)] = str(a["prompt"])
 
     visual_descriptions = [
-        asset_prompts.get(i + 1, str(s.get("visual_description") or ""))
-        for i, s in enumerate(storyboard)
+        asset_prompts.get(i + 1, str(s.get("visual_description") or "")) for i, s in enumerate(storyboard)
     ]
 
     return {
@@ -273,6 +277,7 @@ def _extract_eval_inputs(episode: dict[str, Any], assets: list[dict[str, Any]]) 
 # Patch notes writer
 # ---------------------------------------------------------------------------
 
+
 def _write_patch_note(db_path: Path, dimension: str, score: float, patch: str, action: str) -> None:
     patches_path = db_path.parent / "quality_patches.jsonl"
     record = {
@@ -286,9 +291,7 @@ def _write_patch_note(db_path: Path, dimension: str, score: float, patch: str, a
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def _patch_prompt_for_dimension(
-    dimension: str, score: float, inputs: dict[str, Any], db_path: Path
-) -> str:
+def _patch_prompt_for_dimension(dimension: str, score: float, inputs: dict[str, Any], db_path: Path) -> str:
     """Write diagnostic patch note. Returns the action string."""
     narrations = inputs["narrations"]
     lighting = inputs["lighting_detected"]
@@ -331,6 +334,7 @@ def _patch_prompt_for_dimension(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def evaluate_episode(episode_id: str, db_path: Path) -> dict[str, Any]:
     """
@@ -411,9 +415,7 @@ def run_quality_gate(episode_id: str, db_path: Path, max_retries: int = 2) -> di
     patches_written: list[str] = []
 
     if not result["pass"]:
-        failing_dims = [
-            dim for dim, score in result["scores"].items() if score < PASS_THRESHOLD
-        ]
+        failing_dims = [dim for dim, score in result["scores"].items() if score < PASS_THRESHOLD]
         for dim in failing_dims:
             action = _patch_prompt_for_dimension(dim, result["scores"][dim], result["inputs"], db_path)
             patches_written.append(f"{dim}: {action}")
@@ -427,7 +429,7 @@ def run_quality_gate(episode_id: str, db_path: Path, max_retries: int = 2) -> di
 # Self-check
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    import tempfile, os
+    import tempfile
 
     # Minimal in-memory episode for testing
     ep = {

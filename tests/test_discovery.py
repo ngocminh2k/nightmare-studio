@@ -46,9 +46,7 @@ def test_camoufox_reddit_provider_scrapes_post_with_mock_page():
 
     page = FakePage()
     browser = FakeBrowser()
-    provider = CamoufoxRedditSourceProvider(
-        browser_launcher=lambda playwright: (browser, page)
-    )
+    provider = CamoufoxRedditSourceProvider(browser_launcher=lambda playwright: (browser, page))
 
     story = provider.scrape_post("https://www.reddit.com/r/nosleep/comments/123/nightmare/")
     assert story.title == "Nightmare at the Lighthouse"

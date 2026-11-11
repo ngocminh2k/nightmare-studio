@@ -31,9 +31,7 @@ class _CountingLLMProvider:
 
 def test_storyboard_scenes_are_described_in_batches():
     provider = _CountingLLMProvider(
-        "| Scene | Scene Visual Description |\n"
-        "|---|---|\n"
-        "| 1 | A corridor of dread. |",
+        "| Scene | Scene Visual Description |\n|---|---|\n| 1 | A corridor of dread. |",
     )
     script = " ".join("dread" for _ in range(2000))
 
@@ -60,9 +58,7 @@ def test_storyboard_scenes_survive_unusable_llm_output():
 
 def test_storyboard_scenes_within_cap_still_reach_the_llm():
     provider = _CountingLLMProvider(
-        "| Scene | Scene Visual Description |\n"
-        "|---|---|\n"
-        "| 1 | A door opens in a dim corridor. |",
+        "| Scene | Scene Visual Description |\n|---|---|\n| 1 | A door opens in a dim corridor. |",
     )
     script = " ".join("dread" for _ in range(100))
 
@@ -297,7 +293,9 @@ def test_storyboard_job_uses_the_llm_scene_table_and_builds_nano_banana_prompts(
         "| 2 | A silent corridor narrows around the isolated man. |",
     )
 
-    JobRunner(repo, llm_provider=provider).run(JobRunner(repo, llm_provider=provider).enqueue(episode["id"], "storyboard")["id"])
+    JobRunner(repo, llm_provider=provider).run(
+        JobRunner(repo, llm_provider=provider).enqueue(episode["id"], "storyboard")["id"]
+    )
 
     scenes = repo.get_episode(episode["id"])["storyboard"]
     assert len(scenes) == 2
@@ -381,7 +379,9 @@ def test_audio_job_generates_continuous_master_audio_and_manifest(tmp_path):
     repo.transition_episode(episode["id"], "rewritten")
     repo.transition_episode(episode["id"], "awaiting_script_review")
     repo.add_review(episode["id"], "script", "approved")
-    repo.update_episode(episode["id"], script_final="A door opened slowly into the cedarwood hall. A cold draft entered.")
+    repo.update_episode(
+        episode["id"], script_final="A door opened slowly into the cedarwood hall. A cold draft entered."
+    )
     runner = JobRunner(repo, media_provider=_RecordingMediaProvider(tmp_path))
     runner.run(runner.enqueue(episode["id"], "storyboard")["id"])
     repo.add_review(episode["id"], "assets", "approved")
@@ -446,7 +446,11 @@ def _episode_at_assets_ready(tmp_path):
     repo.transition_episode(episode["id"], "rewritten")
     repo.transition_episode(episode["id"], "awaiting_script_review")
     repo.add_review(episode["id"], "script", "approved")
-    repo.update_episode(episode["id"], script_final="A door opened. A train waited.", storyboard=[{"number": 1, "narration": "A door opened.", "shot": "Wide", "target_duration_seconds": 2.5}])
+    repo.update_episode(
+        episode["id"],
+        script_final="A door opened. A train waited.",
+        storyboard=[{"number": 1, "narration": "A door opened.", "shot": "Wide", "target_duration_seconds": 2.5}],
+    )
     repo.transition_episode(episode["id"], "storyboarded")
     repo.transition_episode(episode["id"], "awaiting_asset_review")
     repo.add_review(episode["id"], "assets", "approved")
@@ -495,7 +499,12 @@ def test_assemble_job_fails_when_ffmpeg_is_missing(tmp_path, monkeypatch):
     repo, episode_id = _episode_at_assets_ready(tmp_path)
     monkeypatch.setattr(jobs_module, "clip_duration_seconds", lambda clip: 6.0)
     monkeypatch.setattr(jobs_module.shutil, "which", lambda name: None)
-    runner = JobRunner(repo, llm_provider=_RecordingLLMProvider('{"edl":[{"scene_number":1,"start_seconds":0,"end_seconds":2,"playback_rate":1,"transition":"cut"}]}'))
+    runner = JobRunner(
+        repo,
+        llm_provider=_RecordingLLMProvider(
+            '{"edl":[{"scene_number":1,"start_seconds":0,"end_seconds":2,"playback_rate":1,"transition":"cut"}]}'
+        ),
+    )
 
     failed = runner.run(runner.enqueue(episode_id, "assemble")["id"])
 

@@ -63,7 +63,9 @@ def test_router_llm_provider_uses_legacy_model_then_auth_fallback():
         return _Response('{"choices":[{"message":{"content":"A usable rewrite."}}]}')
 
     provider = RouterLLMProvider(
-        ProviderSettings(router_base_url="http://router.local/v1", llm_model="mrkane", llm_fallback_model="gemini/fallback"),
+        ProviderSettings(
+            router_base_url="http://router.local/v1", llm_model="mrkane", llm_fallback_model="gemini/fallback"
+        ),
         opener=opener,
         sleeper=lambda _: None,
     )
@@ -75,7 +77,10 @@ def test_router_llm_provider_uses_legacy_model_then_auth_fallback():
 
 
 def test_router_parser_accepts_streaming_server_sent_events():
-    raw = 'data: {"choices":[{"delta":{"content":"A usable "}}]}\n' + 'data: {"choices":[{"delta":{"content":"rewrite."}}]}'
+    raw = (
+        'data: {"choices":[{"delta":{"content":"A usable "}}]}\n'
+        + 'data: {"choices":[{"delta":{"content":"rewrite."}}]}'
+    )
 
     assert parse_chat_completion(raw) == "A usable rewrite."
 

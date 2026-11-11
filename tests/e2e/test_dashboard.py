@@ -15,7 +15,7 @@ def test_dashboard_document_declares_a_usable_creator_workspace():
     content = document.read_text(encoding="utf-8")
 
     assert "Nightmare Studio" in content
-    assert "data-testid=\"create-project\"" in content
+    assert 'data-testid="create-project"' in content
 
 
 def test_creator_can_create_a_project_and_episode_in_the_browser(tmp_path):
@@ -41,7 +41,9 @@ def test_creator_can_create_a_project_and_episode_in_the_browser(tmp_path):
             page.get_by_role("button", name="Create project").click()
             page.get_by_role("button", name="New episode").click()
             page.locator("#episode-form input[name='title']").fill("The empty elevator")
-            page.locator("#episode-form textarea[name='source_text']").fill("The elevator stopped at an impossible floor.")
+            page.locator("#episode-form textarea[name='source_text']").fill(
+                "The elevator stopped at an impossible floor."
+            )
             page.get_by_role("button", name="Create episode").click()
 
             page.get_by_role("heading", name="The empty elevator").wait_for(state="visible")

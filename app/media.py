@@ -27,7 +27,6 @@ from app.providers import LLMProvider
 from app.validation import (
     validate_generated_image,
     validate_generated_video,
-    validate_image_prompt,
     validate_reference_image,
 )
 
@@ -39,7 +38,9 @@ class MediaProvider(Protocol):
 
     def generate_image(self, prompt: str, output_path: Path) -> Path: ...
 
-    def generate_video(self, image_path: Path, motion_prompt: str, output_path: Path, duration_s: int | None = None) -> Path: ...
+    def generate_video(
+        self, image_path: Path, motion_prompt: str, output_path: Path, duration_s: int | None = None
+    ) -> Path: ...
 
 
 class MediaNotConfiguredProvider:
@@ -82,7 +83,7 @@ def build_motion_prompt(scene: dict[str, Any]) -> str:
         f"Target duration: {target_dur:.2f}s of an 8-second clip",
         f"Outgoing transition: {transition}" if transition else "",
     ]
-    context = "\n".join(l for l in lines if l)
+    context = "\n".join(ln for ln in lines if ln)
 
     return (
         f"SCENE INPUT:\n{context}\n\n"
@@ -121,7 +122,7 @@ def veo_video_prompt_plan_messages(scenes: list[dict[str, Any]]) -> list[dict[st
     system_instruction = (
         rules_content + "\n\n"
         "STRICT PRODUCTION REQUIREMENTS:\n"
-        "1. Output strictly a JSON object: {\"scenes\": [{\"number\": 1, \"motion_prompt\": \"...\"}]}.\n"
+        '1. Output strictly a JSON object: {"scenes": [{"number": 1, "motion_prompt": "..."}]}.\n'
         "2. Do NOT emit markdown fences (```json or ```), commentary, or notes.\n"
         "3. Include every scene number provided in SCENES with a complete, production-ready motion prompt in English.\n"
         "4. Follow the FlowKit multi-shot temporal breakdown format (e.g. 0-3s, 3-6s, 6-8s or 0-4s, 4-8s) tailored to each scene's target duration and emotional beat.\n"
@@ -140,7 +141,11 @@ def veo_video_prompt_plan_messages(scenes: list[dict[str, Any]]) -> list[dict[st
     ]
     return [
         {"role": "system", "content": system_instruction},
-        {"role": "user", "content": "Create every scene's Omni Flash / Veo 3.1 image-to-video prompt in one plan using FlowKit multi-shot temporal breakdown rules (e.g., 0-3s, 3-6s, 6-8s). Return JSON only: {\"scenes\":[{\"number\":1,\"motion_prompt\":\"...\"}]}. Include every supplied number exactly once. Choose camera move, transition (angle cut, whip pan, or push-in), action, and audio per scene's emotional beat.\n\nSCENES:\n" + json.dumps(inputs, ensure_ascii=False)},
+        {
+            "role": "user",
+            "content": 'Create every scene\'s Omni Flash / Veo 3.1 image-to-video prompt in one plan using FlowKit multi-shot temporal breakdown rules (e.g., 0-3s, 3-6s, 6-8s). Return JSON only: {"scenes":[{"number":1,"motion_prompt":"..."}]}. Include every supplied number exactly once. Choose camera move, transition (angle cut, whip pan, or push-in), action, and audio per scene\'s emotional beat.\n\nSCENES:\n'
+            + json.dumps(inputs, ensure_ascii=False),
+        },
     ]
 
 
@@ -234,10 +239,7 @@ def build_victor_kane_image_prompt(scene: dict[str, Any]) -> str:
 def _discover_google_api_key() -> str:
     """Read Google / Veo API key from environment."""
     return (
-        os.getenv("NIGHTMARE_VEO_API_KEY")
-        or os.getenv("GOOGLE_API_KEY")
-        or os.getenv("GEMINI_API_KEY")
-        or ""
+        os.getenv("NIGHTMARE_VEO_API_KEY") or os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or ""
     ).strip()
 
 
@@ -340,7 +342,9 @@ class CanvasCDPSettings:
             video_prompt_selector=os.getenv("NIGHTMARE_CANVAS_VIDEO_PROMPT_SELECTOR", "textarea").strip(),
             video_submit_selector=os.getenv("NIGHTMARE_CANVAS_VIDEO_SUBMIT_SELECTOR", "button[type='submit']").strip(),
             video_result_selector=os.getenv("NIGHTMARE_CANVAS_VIDEO_RESULT_SELECTOR", "video").strip(),
-            video_image_input_selector=os.getenv("NIGHTMARE_CANVAS_VIDEO_IMAGE_INPUT_SELECTOR", "input[type='file']").strip(),
+            video_image_input_selector=os.getenv(
+                "NIGHTMARE_CANVAS_VIDEO_IMAGE_INPUT_SELECTOR", "input[type='file']"
+            ).strip(),
             flow_character_reference_path=os.getenv("NIGHTMARE_FLOW_CHARACTER_REFERENCE_PATH", "").strip(),
             kira_api_key=os.getenv("KIRA_API_KEY", "").strip(),
             kira_api_base=os.getenv("KIRA_API_BASE", "https://kiraai.vn/api/v1").strip(),
@@ -355,7 +359,10 @@ class CanvasCDPSettings:
             flow_aspect_ratio=os.getenv("NIGHTMARE_FLOW_ASPECT_RATIO", "16:9").strip() or "16:9",
             flow_video_input_mode=os.getenv("NIGHTMARE_FLOW_VIDEO_INPUT_MODE", "frames").strip() or "frames",
             flow_video_duration=int(os.getenv("NIGHTMARE_FLOW_VIDEO_DURATION", "6").strip() or 6),
-            flow_runner_backend=os.getenv("NIGHTMARE_FLOW_RUNNER_BACKEND", os.getenv("NIGHTMARE_FLOW_RUNNER", "auto")).strip().lower() or "auto",
+            flow_runner_backend=os.getenv("NIGHTMARE_FLOW_RUNNER_BACKEND", os.getenv("NIGHTMARE_FLOW_RUNNER", "auto"))
+            .strip()
+            .lower()
+            or "auto",
             flow_runner_path=os.getenv("NIGHTMARE_FLOW_RUNNER_PATH", "").strip(),
         )
 
@@ -365,8 +372,7 @@ class DeterministicMediaProvider:
 
     name = "mock"
     _ONE_PIXEL_PNG = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/"
-        "qlC+MQAAAABJRU5ErkJggg=="
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/qlC+MQAAAABJRU5ErkJggg=="
     )
 
     def generate_image(self, prompt: str, output_path: Path) -> Path:
@@ -511,7 +517,9 @@ class CanvasCDPMediaProvider:
                     page = context.new_page()
                     page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
                 if upload_path is not None:
-                    page.locator(self.settings.video_image_input_selector).set_input_files(str(upload_path), timeout=timeout_ms)
+                    page.locator(self.settings.video_image_input_selector).set_input_files(
+                        str(upload_path), timeout=timeout_ms
+                    )
                 page.locator(prompt_selector).fill(prompt, timeout=timeout_ms)
                 known_urls = page.locator(result_selector).evaluate_all(
                     "nodes => nodes.map(node => node.getAttribute('src') || node.querySelector('source')?.getAttribute('src')).filter(Boolean)"
@@ -703,16 +711,18 @@ class GoogleFlowCDPMediaProvider(CanvasCDPMediaProvider):
         if media_kind == "image":
             cmd.extend(["--model", self.settings.flow_model_image])
         else:
-            cmd.extend([
-                "--model",
-                self.settings.flow_model_video,
-                "--resolution",
-                self.settings.flow_video_resolution,
-                "--duration",
-                str(self.settings.flow_video_duration),
-                "--videoInputMode",
-                self.settings.flow_video_input_mode,
-            ])
+            cmd.extend(
+                [
+                    "--model",
+                    self.settings.flow_model_video,
+                    "--resolution",
+                    self.settings.flow_video_resolution,
+                    "--duration",
+                    str(self.settings.flow_video_duration),
+                    "--videoInputMode",
+                    self.settings.flow_video_input_mode,
+                ]
+            )
         if upload_path is not None:
             cmd.extend(["--media", str(upload_path)])
         return cmd
@@ -731,7 +741,9 @@ class GoogleFlowCDPMediaProvider(CanvasCDPMediaProvider):
             raise FileNotFoundError(f"Google Flow CDP runner script not found: {runner_path}")
 
         node_exe = shutil.which("node")
-        npx_exe = shutil.which("npx.cmd") if sys.platform == "win32" and shutil.which("npx.cmd") else shutil.which("npx")
+        npx_exe = (
+            shutil.which("npx.cmd") if sys.platform == "win32" and shutil.which("npx.cmd") else shutil.which("npx")
+        )
         if not npx_exe and not node_exe:
             raise RuntimeError("Google Flow CDP runner requires Node.js / npx, but 'npx' was not found in PATH")
 
@@ -813,7 +825,9 @@ class GoogleFlowCDPMediaProvider(CanvasCDPMediaProvider):
         try:
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
-            raise RuntimeError("Google Flow CDP mode requires Playwright; install the project test dependencies") from exc
+            raise RuntimeError(
+                "Google Flow CDP mode requires Playwright; install the project test dependencies"
+            ) from exc
 
         timeout_ms = self.settings.timeout_seconds * 1000
         with sync_playwright() as playwright:
@@ -822,7 +836,16 @@ class GoogleFlowCDPMediaProvider(CanvasCDPMediaProvider):
                 if not browser.contexts:
                     raise RuntimeError("The connected Chrome session has no browser context")
                 context = browser.contexts[0]
-                page = next((item for item in context.pages if "flow.google.com" in item.url or "labs.google" in item.url or self._is_exact_project_canvas_url(item.url, url)), None)
+                page = next(
+                    (
+                        item
+                        for item in context.pages
+                        if "flow.google.com" in item.url
+                        or "labs.google" in item.url
+                        or self._is_exact_project_canvas_url(item.url, url)
+                    ),
+                    None,
+                )
                 if page is None:
                     page = context.new_page()
                     page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
@@ -831,7 +854,9 @@ class GoogleFlowCDPMediaProvider(CanvasCDPMediaProvider):
                 if media_kind == "image" and upload_path is not None:
                     self._attach_flow_reference(page, upload_path, timeout_ms)
                 elif upload_path is not None:
-                    page.locator(self.settings.video_image_input_selector).set_input_files(str(upload_path), timeout=timeout_ms)
+                    page.locator(self.settings.video_image_input_selector).set_input_files(
+                        str(upload_path), timeout=timeout_ms
+                    )
                 known_urls = page.locator(result_selector).evaluate_all(
                     "nodes => nodes.map(node => node.getAttribute('src') || node.querySelector('source')?.getAttribute('src')).filter(Boolean)"
                 )
@@ -1092,20 +1117,34 @@ def generate_cinematic_motion_clip(image_path: Path, motion_prompt: str, output_
     vf = f"zoompan=z='{z_expr}':x='{x_expr}':y='{y_expr}':d=144:s=1280x720:fps=24"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        ffmpeg, "-y",
-        "-loop", "1",
-        "-i", str(image_path),
-        "-f", "lavfi",
-        "-i", "anoisesrc=c=pink:r=48000:a=0.005",
-        "-vf", vf,
-        "-c:v", "libx264",
-        "-preset", "fast",
-        "-crf", "19",
-        "-t", "6.0",
-        "-c:a", "aac",
-        "-b:a", "128k",
-        "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart",
+        ffmpeg,
+        "-y",
+        "-loop",
+        "1",
+        "-i",
+        str(image_path),
+        "-f",
+        "lavfi",
+        "-i",
+        "anoisesrc=c=pink:r=48000:a=0.005",
+        "-vf",
+        vf,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "fast",
+        "-crf",
+        "19",
+        "-t",
+        "6.0",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "128k",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
         str(output_path),
     ]
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
@@ -1159,7 +1198,9 @@ class GoogleVeoMediaProvider:
         sanitized_prompt = sanitize_veo_prompt(motion_prompt)
 
         for model in self.models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:predictLongRunning?key={self.api_key}"
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{model}:predictLongRunning?key={self.api_key}"
+            )
             body = {
                 "instances": [
                     {
@@ -1233,6 +1274,7 @@ def remove_image_watermark(image_path: Path) -> Path:
             cv2.imwrite(str(image_path), inpainted)
     except Exception as exc:
         import logging
+
         logging.getLogger("nightmare_studio.media").warning("Image watermark removal skipped (%s)", exc)
     return image_path
 
@@ -1265,14 +1307,22 @@ def remove_video_watermark(video_path: Path) -> Path:
 
         temp_cleaned = video_path.parent / f"{video_path.stem}_cleaned{video_path.suffix}"
         cmd = [
-            ffmpeg, "-y",
-            "-i", str(video_path),
-            "-vf", f"delogo=x={delogo_x}:y={delogo_y}:w={delogo_w}:h={delogo_h}:show=0",
-            "-c:v", "libx264",
-            "-preset", "fast",
-            "-crf", "18",
-            "-c:a", "copy",
-            "-movflags", "+faststart",
+            ffmpeg,
+            "-y",
+            "-i",
+            str(video_path),
+            "-vf",
+            f"delogo=x={delogo_x}:y={delogo_y}:w={delogo_w}:h={delogo_h}:show=0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "fast",
+            "-crf",
+            "18",
+            "-c:a",
+            "copy",
+            "-movflags",
+            "+faststart",
             str(temp_cleaned),
         ]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
@@ -1280,6 +1330,7 @@ def remove_video_watermark(video_path: Path) -> Path:
             shutil.move(str(temp_cleaned), str(video_path))
     except Exception as exc:
         import logging
+
         logging.getLogger("nightmare_studio.media").warning("Video watermark removal skipped (%s)", exc)
     return video_path
 
@@ -1328,9 +1379,8 @@ class GoogleFlowKitMediaProvider:
         # Character reference anchoring: the reference image is uploaded once and reused as
         # FlowKit character_media_ids so Victor's face holds across scenes. Only scenes where
         # the protagonist is actually in frame should pass it.
-        self.character_reference_path = (
-            os.getenv("NIGHTMARE_FLOW_CHARACTER_REFERENCE_PATH")
-            or str(Path(__file__).resolve().parents[1] / "assets" / "mrkane-flow-reference.png")
+        self.character_reference_path = os.getenv("NIGHTMARE_FLOW_CHARACTER_REFERENCE_PATH") or str(
+            Path(__file__).resolve().parents[1] / "assets" / "mrkane-flow-reference.png"
         )
         self._character_media_id_cache: dict[tuple[str, str], str] = {}
 
@@ -1373,24 +1423,27 @@ class GoogleFlowKitMediaProvider:
     @staticmethod
     def _is_quota_error(message: str) -> bool:
         low = str(message).lower()
-        return any(k in low for k in (
-            "public_error_per_model_daily_quota_reached",
-            "public_error_user_quota_reached",
-            "public_error_unusual_activity_too_much_traffic",
-            "unusual_activity",
-            "unusual activity",
-            "too_much_traffic",
-            "quota_reached",
-            "quota_exceeded",
-            "resource_exhausted",
-            "exhausted",
-            "code 8",
-            "out of credits",
-            "insufficient_credits",
-            "daily_quota",
-            "user_quota",
-            "429",
-        ))
+        return any(
+            k in low
+            for k in (
+                "public_error_per_model_daily_quota_reached",
+                "public_error_user_quota_reached",
+                "public_error_unusual_activity_too_much_traffic",
+                "unusual_activity",
+                "unusual activity",
+                "too_much_traffic",
+                "quota_reached",
+                "quota_exceeded",
+                "resource_exhausted",
+                "exhausted",
+                "code 8",
+                "out of credits",
+                "insufficient_credits",
+                "daily_quota",
+                "user_quota",
+                "429",
+            )
+        )
 
     def rotate_to_next_account(self) -> bool:
         """Sequentially rotate to the next registered Flow account.
@@ -1432,9 +1485,12 @@ class GoogleFlowKitMediaProvider:
         script = Path(__file__).resolve().parents[1] / "scripts" / "switch-account.ps1"
         cmd = [
             "powershell.exe",
-            "-ExecutionPolicy", "Bypass",
-            "-File", str(script),
-            "-Account", str(next_account),
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(script),
+            "-Account",
+            str(next_account),
             "-NoRestart",
         ]
         try:
@@ -1449,8 +1505,7 @@ class GoogleFlowKitMediaProvider:
         self._character_media_id_cache.clear()
         self._check_connected()
         print(
-            f"[FlowKit Account Rotation] Successfully switched to account {next_account} "
-            f"(project {self.project_id}).",
+            f"[FlowKit Account Rotation] Successfully switched to account {next_account} (project {self.project_id}).",
             flush=True,
         )
         return True
@@ -1482,11 +1537,16 @@ class GoogleFlowKitMediaProvider:
                     return 0.0
                 sleep_chunk = min(remaining_s + 5.0, 60.0)
                 import logging
+
                 logging.getLogger("nightmare_studio.media").warning(
                     "[FlowKit Cooldown] Unusual activity hold active: %.1fs remaining. Waiting %.1fs...",
-                    remaining_s, sleep_chunk
+                    remaining_s,
+                    sleep_chunk,
                 )
-                print(f"\n[FlowKit Cooldown] Unusual activity hold active: {remaining_s:.1f}s remaining. Waiting {sleep_chunk:.1f}s...", flush=True)
+                print(
+                    f"\n[FlowKit Cooldown] Unusual activity hold active: {remaining_s:.1f}s remaining. Waiting {sleep_chunk:.1f}s...",
+                    flush=True,
+                )
                 time.sleep(sleep_chunk)
             except Exception:
                 time.sleep(15)
@@ -1496,10 +1556,14 @@ class GoogleFlowKitMediaProvider:
         soft_failures = 0
         while True:
             body = json.dumps(payload).encode("utf-8")
-            req = Request(url, data=body, headers={
-                "Content-Type": "application/json",
-                "X-FlowKit-Caller": "nightmare-studio",
-            })
+            req = Request(
+                url,
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-FlowKit-Caller": "nightmare-studio",
+                },
+            )
             try:
                 with urlopen(req, timeout=self.timeout) as resp:
                     return json.loads(resp.read().decode("utf-8"))
@@ -1554,6 +1618,7 @@ class GoogleFlowKitMediaProvider:
     def _upload_image(self, image_path: Path, base: str = "", project_id: str = "") -> str:
         """Upload image file to flowkit, return media_id UUID."""
         import mimetypes
+
         base = base or self.base
         project_id = project_id or self.project_id
 
@@ -1564,25 +1629,28 @@ class GoogleFlowKitMediaProvider:
         boundary = "----FlowKitBoundary" + base64.b64encode(os.urandom(8)).decode()
         body_parts = [
             f"--{boundary}\r\n"
-            f"Content-Disposition: form-data; name=\"file\"; filename=\"{image_path.name}\"\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{image_path.name}"\r\n'
             f"Content-Type: {mime_type}\r\n\r\n".encode(),
             img_bytes,
         ]
         # project_id is a Form field on the FlowKit endpoint, not a query parameter.
         if project_id:
             body_parts.append(
-                f"\r\n--{boundary}\r\n"
-                f"Content-Disposition: form-data; name=\"project_id\"\r\n\r\n".encode()
+                f'\r\n--{boundary}\r\nContent-Disposition: form-data; name="project_id"\r\n\r\n'.encode()
                 + project_id.encode()
             )
         body_parts.append(f"\r\n--{boundary}--\r\n".encode())
         body = b"".join(p if isinstance(p, bytes) else p.encode() for p in body_parts)
 
         url = f"{base}/api/flow/upload-image-file"
-        req = Request(url, data=body, headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "X-FlowKit-Caller": "nightmare-studio",
-        })
+        req = Request(
+            url,
+            data=body,
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "X-FlowKit-Caller": "nightmare-studio",
+            },
+        )
         while True:
             try:
                 with urlopen(req, timeout=60) as resp:
@@ -1656,10 +1724,14 @@ class GoogleFlowKitMediaProvider:
 
         img_url = urls[0] if urls else ""
         if not img_url and media_ids:
-            url_res = self._post("/api/flow/media-url", {
-                "media_id": media_ids[0],
-                "project_id": project_id,
-            }, base=base)
+            url_res = self._post(
+                "/api/flow/media-url",
+                {
+                    "media_id": media_ids[0],
+                    "project_id": project_id,
+                },
+                base=base,
+            )
             img_url = url_res.get("url") or ""
 
         if not img_url:
@@ -1698,16 +1770,20 @@ class GoogleFlowKitMediaProvider:
             if final_duration not in {4, 6, 8, 10}:
                 final_duration = min([4, 6, 8, 10], key=lambda x: abs(x - final_duration))
 
-            vid_result = self._post("/api/flow/generate-video", {
-                "start_image_media_id": media_id,
-                "prompt": sanitized,
-                "project_id": project_id,
-                "scene_id": image_path.stem,
-                "aspect_ratio": "VIDEO_ASPECT_RATIO_LANDSCAPE",
-                "model_family": self.model_video,  # "omni_flash" or "veo"
-                "duration_s": final_duration,
-                "resolution": self.resolution,
-            }, base=base)
+            vid_result = self._post(
+                "/api/flow/generate-video",
+                {
+                    "start_image_media_id": media_id,
+                    "prompt": sanitized,
+                    "project_id": project_id,
+                    "scene_id": image_path.stem,
+                    "aspect_ratio": "VIDEO_ASPECT_RATIO_LANDSCAPE",
+                    "model_family": self.model_video,  # "omni_flash" or "veo"
+                    "duration_s": final_duration,
+                    "resolution": self.resolution,
+                },
+                base=base,
+            )
 
             # Step 3: poll /api/flow/check-status until completed
             operations: list = vid_result.get("operations") or []
@@ -1787,6 +1863,7 @@ class GoogleFlowKitMediaProvider:
                     f"Flowkit real video generation failed ({exc}). Motion fallback is disabled."
                 ) from exc
             import logging
+
             logging.getLogger("nightmare_studio.media").warning(
                 "Flowkit video generation failed (%s); falling back to cinematic motion clip", exc
             )
@@ -1808,13 +1885,17 @@ def configured_media_provider(settings: CanvasCDPSettings) -> MediaProvider:
         return GoogleVeoMediaProvider(settings)
     if settings.media_mode == "not_configured":
         return MediaNotConfiguredProvider()
-    raise ValueError("NIGHTMARE_MEDIA_MODE must be 'not_configured', 'canvas_cdp', 'google_flow_cdp', 'flowkit', 'kira_api', or 'google_veo'")
+    raise ValueError(
+        "NIGHTMARE_MEDIA_MODE must be 'not_configured', 'canvas_cdp', 'google_flow_cdp', 'flowkit', 'kira_api', or 'google_veo'"
+    )
 
 
 def public_media_status(settings: CanvasCDPSettings) -> dict[str, bool | str]:
     """Expose configuration readiness without leaking Canvas URLs or browser state."""
 
-    configured = settings.media_mode == "canvas_cdp" and bool(settings.cdp_url and settings.image_url and settings.video_url)
+    configured = settings.media_mode == "canvas_cdp" and bool(
+        settings.cdp_url and settings.image_url and settings.video_url
+    )
     if settings.media_mode == "google_flow_cdp":
         configured = bool(
             settings.cdp_url

@@ -1,4 +1,4 @@
-﻿"""SystemOne integration for fast, deterministic, and 9Router-backed decision making."""
+"""SystemOne integration for fast, deterministic, and 9Router-backed decision making."""
 
 from __future__ import annotations
 
@@ -121,9 +121,7 @@ class RouterSystemOneClient:
             raise last_error
         raise RuntimeError("No SystemOne model candidates available")
 
-    def _request(
-        self, state: str | dict[str, Any], questions: dict[str, dict[str, Any]], model: str
-    ) -> dict[str, Any]:
+    def _request(self, state: str | dict[str, Any], questions: dict[str, dict[str, Any]], model: str) -> dict[str, Any]:
         payload = json.dumps({"model": model, "state": state, "questions": questions}).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.settings.router_api_key and self.settings.router_send_auth:
@@ -280,7 +278,9 @@ def evaluate_scene_director(
         choice = str(val_shot.get("choice", val_shot.get("value", "wide_establishing")))
     else:
         choice = str(val_shot if val_shot is not None else "wide_establishing")
-    shot_type = choice if choice in {"close_up_detail", "wide_establishing", "character_portrait"} else "wide_establishing"
+    shot_type = (
+        choice if choice in {"close_up_detail", "wide_establishing", "character_portrait"} else "wide_establishing"
+    )
 
     val_trans = result.get("transition")
     if isinstance(val_trans, dict):

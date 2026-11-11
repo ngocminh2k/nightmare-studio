@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
-from typing import Any
 
 
 class ValidationError(Exception):
     """Raised when an asset, prompt, or media render fails strict quality gates."""
+
     pass
 
 
@@ -33,17 +32,31 @@ def validate_image_prompt(prompt: str) -> list[str]:
     if not any(k in p_lower for k in ("chiaroscuro", "lantern", "moonlight", "lighting")):
         errors.append("Prompt must specify lighting/chiaroscuro.")
 
-    if not any(k in p_lower for k in (
-        "charcoal", "slate blue", "slate grey", "slate gray", "steel gr",
-        "amber", "crimson", "blue-grey", "blue-gray", "midnight blue",
-        "ivory", "90% black", "deep shadow",
-    )):
+    if not any(
+        k in p_lower
+        for k in (
+            "charcoal",
+            "slate blue",
+            "slate grey",
+            "slate gray",
+            "steel gr",
+            "amber",
+            "crimson",
+            "blue-grey",
+            "blue-gray",
+            "midnight blue",
+            "ivory",
+            "90% black",
+            "deep shadow",
+        )
+    ):
         errors.append("Prompt must specify restrained horror color palette (charcoal/slate/amber).")
 
     # If Victor Kane is referenced, ensure character spec & reference identity are locked.
     # Use word-boundary check: "Victorian" must not trigger this.
     import re as _re
-    _has_victor = bool(_re.search(r'\bvictor\b', p_lower)) or "investigator" in p_lower
+
+    _has_victor = bool(_re.search(r"\bvictor\b", p_lower)) or "investigator" in p_lower
     if _has_victor:
         if "reference image" not in p_lower:
             errors.append("Character prompt must specify 'matching reference image character identity'.")
@@ -62,12 +75,38 @@ def validate_motion_prompt(motion_prompt: str) -> list[str]:
     if len(mp) > 650:
         errors.append(f"Motion prompt length ({len(mp)}) exceeds maximum 650 characters.")
     cinematic_keywords = (
-        "slow", "camera", "push", "pull", "pan", "subtle", "dread", "cinematic",
-        "cut", "shot", "angle", "whip", "rack", "focus", "drift", "track", "close-up", "zoom",
-        "creep", "tilt", "dolly", "orbit", "reveal", "lock", "anchor", "rotate", "sweep",
+        "slow",
+        "camera",
+        "push",
+        "pull",
+        "pan",
+        "subtle",
+        "dread",
+        "cinematic",
+        "cut",
+        "shot",
+        "angle",
+        "whip",
+        "rack",
+        "focus",
+        "drift",
+        "track",
+        "close-up",
+        "zoom",
+        "creep",
+        "tilt",
+        "dolly",
+        "orbit",
+        "reveal",
+        "lock",
+        "anchor",
+        "rotate",
+        "sweep",
     )
     if not any(k in mp.lower() for k in cinematic_keywords):
-        errors.append("Motion prompt should specify controlled camera movement (slow, push-in, subtle, cut, pan, etc.).")
+        errors.append(
+            "Motion prompt should specify controlled camera movement (slow, push-in, subtle, cut, pan, etc.)."
+        )
     return errors
 
 
@@ -128,6 +167,7 @@ def validate_generated_image(
     try:
         from PIL import Image
         import hashlib
+
         with Image.open(path) as im:
             w, h = im.size
             # Google Flow reference image is 1672x941
@@ -190,4 +230,3 @@ def validate_generated_audio(audio_path: Path | str) -> list[str]:
     except Exception as exc:
         errors.append(f"Failed to read audio header: {exc}")
     return errors
-

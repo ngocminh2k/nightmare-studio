@@ -149,5 +149,3 @@ def test_validate_generated_audio(tmp_path: Path):
     valid_audio = tmp_path / "valid.mp3"
     valid_audio.write_bytes(b"ID3" + b"\x00" * 2000)
     assert validate_generated_audio(valid_audio) == []
-
-

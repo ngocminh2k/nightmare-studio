@@ -27,7 +27,6 @@ from .repository import StudioRepository
 from .systemone import (
     DeterministicSystemOneClient,
     SystemOneClient,
-    calculate_shot_duration,
     classify_shot_type,
     decide_scene_transition,
     evaluate_scene_director,
@@ -57,7 +56,9 @@ def extract_source_beats(source: str, llm_provider: LLMProvider, chunk_chars: in
         end = start + chunk_chars
         if end < len(source):
             # Prefer a paragraph/line boundary so a beat never starts mid-sentence.
-            boundary = max(source.rfind("\n\n", start, end), source.rfind("\n", start, end), source.rfind(" ", start, end))
+            boundary = max(
+                source.rfind("\n\n", start, end), source.rfind("\n", start, end), source.rfind(" ", start, end)
+            )
             if boundary > start:
                 end = boundary
         chunk = source[start:end].strip()
@@ -78,7 +79,10 @@ def supervise_draft(draft: str, llm_provider: LLMProvider) -> str:
         return ""
     notes = llm_provider.generate(
         [
-            {"role": "system", "content": "You are the horror desk supervisor. Review the narration draft for voice consistency, slow-burn pacing, and plot continuity. Return at most 5 short bullet notes in English; never rewrite the draft."},
+            {
+                "role": "system",
+                "content": "You are the horror desk supervisor. Review the narration draft for voice consistency, slow-burn pacing, and plot continuity. Return at most 5 short bullet notes in English; never rewrite the draft.",
+            },
             {"role": "user", "content": draft[:8000]},
         ]
     ).strip()
@@ -144,7 +148,11 @@ def parse_edit_decision_list(response: str, scene_durations: dict[int, float]) -
     """Validate the LLM's machine-readable edit plan before it reaches FFmpeg."""
 
     match = re.search(r"\{.*\}", response, re.DOTALL)
-    cleaned = match.group(0) if match else response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    cleaned = (
+        match.group(0)
+        if match
+        else response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    )
     try:
         items = json.loads(cleaned)["edl"]
         plan = [
@@ -162,7 +170,12 @@ def parse_edit_decision_list(response: str, scene_durations: dict[int, float]) -
     numbers = [item["scene_number"] for item in plan]
     if set(numbers) != set(scene_durations) or len(numbers) != len(scene_durations):
         raise ValueError("Edit decision list must include every scene exactly once")
-    if any(item["transition"] != "cut" or not 0 <= item["start_seconds"] < item["end_seconds"] <= scene_durations[item["scene_number"]] or not 0.5 <= item["playback_rate"] <= 1.7 for item in plan):
+    if any(
+        item["transition"] != "cut"
+        or not 0 <= item["start_seconds"] < item["end_seconds"] <= scene_durations[item["scene_number"]]
+        or not 0.5 <= item["playback_rate"] <= 1.7
+        for item in plan
+    ):
         raise ValueError("Edit decision list may use cut transitions, valid source trims, and 0.5x-1.7x playback")
     return plan
 
@@ -175,10 +188,14 @@ def rendered_seconds(item: dict[str, Any]) -> float:
 
 
 def edit_script_markdown(plan: list[dict[str, Any]]) -> str:
-    return "# Edit decision list\n\n" + "\n".join(
-        f"- Scene {item['scene_number']}: {item['start_seconds']:.2f}s-{item['end_seconds']:.2f}s at {item['playback_rate']:.2f}x, {item['transition']}"
-        for item in plan
-    ) + "\n"
+    return (
+        "# Edit decision list\n\n"
+        + "\n".join(
+            f"- Scene {item['scene_number']}: {item['start_seconds']:.2f}s-{item['end_seconds']:.2f}s at {item['playback_rate']:.2f}x, {item['transition']}"
+            for item in plan
+        )
+        + "\n"
+    )
 
 
 def apply_director_pacing(
@@ -214,9 +231,7 @@ def apply_director_pacing(
         narration = str(scene.get("narration") or "")
         try:
             directed_target = (
-                float(scene["target_duration_seconds"])
-                if scene.get("target_duration_seconds") is not None
-                else None
+                float(scene["target_duration_seconds"]) if scene.get("target_duration_seconds") is not None else None
             )
         except (TypeError, ValueError):
             directed_target = None
@@ -260,7 +275,18 @@ def clip_has_audio(clip: Path) -> bool:
     if not ffprobe:
         raise RuntimeError("FFprobe is required to preserve original clip audio during assembly")
     result = subprocess.run(
-        [ffprobe, "-v", "error", "-select_streams", "a", "-show_entries", "stream=codec_type", "-of", "csv=p=0", str(clip)],
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-select_streams",
+            "a",
+            "-show_entries",
+            "stream=codec_type",
+            "-of",
+            "csv=p=0",
+            str(clip),
+        ],
         capture_output=True,
         text=True,
         timeout=30,
@@ -274,7 +300,21 @@ def clip_duration_seconds(clip: Path) -> float:
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
         raise RuntimeError("FFprobe is required to calculate scene pacing during assembly")
-    result = subprocess.run([ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(clip)], capture_output=True, text=True, timeout=30)
+    result = subprocess.run(
+        [
+            ffprobe,
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(clip),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
     try:
         duration = float(result.stdout.strip())
     except ValueError as exc:
@@ -291,9 +331,13 @@ def build_assemble_filters(plan: list[dict[str, Any]], has_audio_list: list[bool
         start, end, rate = item["start_seconds"], item["end_seconds"], item["playback_rate"]
         filters.append(f"[{index}:v]trim=start={start}:end={end},setpts=PTS-STARTPTS,setpts=PTS/{rate}[v{index}]")
         if has_audio_list[index]:
-            filters.append(f"[{index}:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,atempo={rate},aformat=sample_rates=48000:channel_layouts=stereo[a{index}]")
+            filters.append(
+                f"[{index}:a]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,atempo={rate},aformat=sample_rates=48000:channel_layouts=stereo[a{index}]"
+            )
         else:
-            filters.append(f"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={(end - start) / rate},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[a{index}]")
+            filters.append(
+                f"anullsrc=channel_layout=stereo:sample_rate=48000,atrim=duration={(end - start) / rate},asetpts=PTS-STARTPTS,aformat=sample_rates=48000:channel_layouts=stereo[a{index}]"
+            )
     return filters
 
 
@@ -359,7 +403,9 @@ class JobRunner:
         beat_threshold = int(os.environ.get("NIGHTMARE_BEAT_EXTRACTION_THRESHOLD", str(SOURCE_BEAT_CHUNK_CHARS)))
         if len(source) > beat_threshold:
             source = extract_source_beats(source, self.llm_provider)
-            self.repository.add_activity(episode["id"], "rewrite", "Compressed the long source into tension beats before rewriting")
+            self.repository.add_activity(
+                episode["id"], "rewrite", "Compressed the long source into tension beats before rewriting"
+            )
         prompt = build_legacy_narrative_prompt(
             title=title,
             source=source,
@@ -373,17 +419,22 @@ class JobRunner:
             if len(draft.split()) >= target_words * 0.9:
                 break
             self.repository.add_activity(
-                episode["id"], "rewrite",
+                episode["id"],
+                "rewrite",
                 f"Expanding draft to reach {target_words} words (attempt {attempt}, currently {len(draft.split())})",
             )
             draft = self.llm_provider.generate([{"role": "user", "content": _expansion_prompt(draft, target_words)}])
         if episode["status"] != EpisodeStatus.REWRITTEN.value:
             self.repository.transition_episode(episode["id"], EpisodeStatus.REWRITTEN, note="Rewrite draft generated")
-        updated = self.repository.update_episode(episode["id"], script_draft=draft, cost_total=float(episode["cost_total"]) + 0.02)
+        updated = self.repository.update_episode(
+            episode["id"], script_draft=draft, cost_total=float(episode["cost_total"]) + 0.02
+        )
         notes = supervise_draft(draft, self.llm_provider)
         if notes:
             self.repository.add_activity(episode["id"], "review", f"Supervisor QA notes: {notes}")
-        self.repository.transition_episode(episode["id"], EpisodeStatus.AWAITING_SCRIPT_REVIEW, note="Draft ready for script review")
+        self.repository.transition_episode(
+            episode["id"], EpisodeStatus.AWAITING_SCRIPT_REVIEW, note="Draft ready for script review"
+        )
         self.repository.update_job(job["id"], progress=85)
         return {"episode_id": episode["id"], "characters": len(draft), "status": updated["status"] if updated else ""}
 
@@ -397,8 +448,12 @@ class JobRunner:
             raise ValueError("Approved script has no usable narration")
         self.repository.update_job(job["id"], progress=65)
         self.repository.update_episode(episode["id"], storyboard=scenes, cost_total=float(episode["cost_total"]) + 0.01)
-        self.repository.transition_episode(episode["id"], EpisodeStatus.STORYBOARDED, note=f"Created {len(scenes)} storyboard scenes")
-        self.repository.transition_episode(episode["id"], EpisodeStatus.AWAITING_ASSET_REVIEW, note="Storyboard awaiting asset review")
+        self.repository.transition_episode(
+            episode["id"], EpisodeStatus.STORYBOARDED, note=f"Created {len(scenes)} storyboard scenes"
+        )
+        self.repository.transition_episode(
+            episode["id"], EpisodeStatus.AWAITING_ASSET_REVIEW, note="Storyboard awaiting asset review"
+        )
         return {"scene_count": len(scenes)}
 
     def _run_assets(self, job: dict[str, Any]) -> dict[str, Any]:
@@ -407,7 +462,9 @@ class JobRunner:
             raise ValueError("Image CSV export and video-prompt preparation require an approved storyboard")
         scenes = episode["storyboard"]
         if not all(scene.get("target_duration_seconds") for scene in scenes):
-            scenes = apply_director_pacing(scenes, episode["script_final"].strip() or episode["script_draft"].strip(), client=self.systemone_client)
+            scenes = apply_director_pacing(
+                scenes, episode["script_final"].strip() or episode["script_draft"].strip(), client=self.systemone_client
+            )
             self.repository.update_episode(episode["id"], storyboard=scenes)
         output_dir = self.repository.database_path.parent / "outputs" / episode["id"]
         csv_path = write_image_prompt_csv(output_dir / "image_prompts.csv", scenes)
@@ -419,17 +476,29 @@ class JobRunner:
                     scene["motion_prompt"] = prompts[num]
                     scene["motion_prompt_plan_version"] = 3
             self.repository.update_episode(episode["id"], storyboard=scenes)
-            self.repository.add_activity(episode["id"], "assets", f"Generated FlowKit multi-shot motion prompt plan for {len(scenes)} scene(s) via LLM")
+            self.repository.add_activity(
+                episode["id"],
+                "assets",
+                f"Generated FlowKit multi-shot motion prompt plan for {len(scenes)} scene(s) via LLM",
+            )
         uploaded = [scene for scene in scenes if Path(str(scene.get("asset_path") or "")).is_file()]
         if len(uploaded) != len(scenes):
-            self.repository.add_activity(episode["id"], "assets", f"Exported image CSV; awaiting {len(scenes) - len(uploaded)} scene upload(s)")
-            return {"csv_path": str(csv_path), "uploaded": len(uploaded), "awaiting_uploads": len(scenes) - len(uploaded)}
+            self.repository.add_activity(
+                episode["id"], "assets", f"Exported image CSV; awaiting {len(scenes) - len(uploaded)} scene upload(s)"
+            )
+            return {
+                "csv_path": str(csv_path),
+                "uploaded": len(uploaded),
+                "awaiting_uploads": len(scenes) - len(uploaded),
+            }
         for scene in scenes:
             scene["asset_status"] = "uploaded"
             if not scene["motion_prompt"]:
                 raise ValueError(f"Scene {scene['number']} has no Veo 3.1 prompt plan")
         self.repository.update_episode(episode["id"], storyboard=scenes)
-        self.repository.transition_episode(episode["id"], EpisodeStatus.ASSETS_READY, note="All scene images uploaded; Veo 3.1 prompts prepared")
+        self.repository.transition_episode(
+            episode["id"], EpisodeStatus.ASSETS_READY, note="All scene images uploaded; Veo 3.1 prompts prepared"
+        )
         return {"csv_path": str(csv_path), "asset_count": len(scenes), "video_prompts_prepared": len(scenes)}
 
     def _run_assemble(self, job: dict[str, Any]) -> dict[str, Any]:
@@ -453,9 +522,26 @@ class JobRunner:
             for scene in scenes
             if scene.get("audio_duration_seconds")
         }
-        edit_request = "Execute the pre-directed pacing plan. Return JSON only: {\"edl\":[{\"scene_number\":1,\"start_seconds\":0,\"end_seconds\":4.25,\"playback_rate\":0.85,\"transition\":\"cut\"}]}. Include every scene exactly once; only use cut transitions; playback_rate must be 0.5 to 1.7; never exceed the source duration; and rendered duration (end-start)/playback_rate must not exceed target_duration_seconds.\n\n" + json.dumps([{"scene_number": scene["number"], "source_duration_seconds": source_durations[int(scene["number"])], "target_duration_seconds": target_durations[int(scene["number"])], "narration": scene.get("narration"), "shot": scene.get("shot")} for scene in scenes], ensure_ascii=False)
+        edit_request = (
+            'Execute the pre-directed pacing plan. Return JSON only: {"edl":[{"scene_number":1,"start_seconds":0,"end_seconds":4.25,"playback_rate":0.85,"transition":"cut"}]}. Include every scene exactly once; only use cut transitions; playback_rate must be 0.5 to 1.7; never exceed the source duration; and rendered duration (end-start)/playback_rate must not exceed target_duration_seconds.\n\n'
+            + json.dumps(
+                [
+                    {
+                        "scene_number": scene["number"],
+                        "source_duration_seconds": source_durations[int(scene["number"])],
+                        "target_duration_seconds": target_durations[int(scene["number"])],
+                        "narration": scene.get("narration"),
+                        "shot": scene.get("shot"),
+                    }
+                    for scene in scenes
+                ],
+                ensure_ascii=False,
+            )
+        )
         try:
-            plan = parse_edit_decision_list(self.llm_provider.generate([{"role": "user", "content": edit_request}]), source_durations)
+            plan = parse_edit_decision_list(
+                self.llm_provider.generate([{"role": "user", "content": edit_request}]), source_durations
+            )
         except Exception:
             # Deterministic pacing fallback: trim or conform playback rate to target duration
             plan = []
@@ -464,22 +550,26 @@ class JobRunner:
                 src_d = source_durations.get(num, 6.0)
                 tgt_d = target_durations.get(num, 5.0)
                 if src_d >= tgt_d:
-                    plan.append({
-                        "scene_number": num,
-                        "start_seconds": 0.0,
-                        "end_seconds": round(tgt_d, 2),
-                        "playback_rate": 1.0,
-                        "transition": "cut",
-                    })
+                    plan.append(
+                        {
+                            "scene_number": num,
+                            "start_seconds": 0.0,
+                            "end_seconds": round(tgt_d, 2),
+                            "playback_rate": 1.0,
+                            "transition": "cut",
+                        }
+                    )
                 else:
                     rate = max(0.6, min(1.5, round(src_d / max(0.1, tgt_d), 2)))
-                    plan.append({
-                        "scene_number": num,
-                        "start_seconds": 0.0,
-                        "end_seconds": round(src_d, 2),
-                        "playback_rate": rate,
-                        "transition": "cut",
-                    })
+                    plan.append(
+                        {
+                            "scene_number": num,
+                            "start_seconds": 0.0,
+                            "end_seconds": round(src_d, 2),
+                            "playback_rate": rate,
+                            "transition": "cut",
+                        }
+                    )
         # A scene's narration is the pacing authority: cut it whole and at natural
         # speed, so an editorial retime can never slice a line mid-sentence.
         for item in plan:
@@ -497,7 +587,9 @@ class JobRunner:
             tgt = target_durations[num]
             excess = rendered_seconds(item) - tgt
             if 0 < excess <= 0.5:
-                item["end_seconds"] = min(item["end_seconds"], item["start_seconds"] + (tgt * item["playback_rate"]) - 1e-4)
+                item["end_seconds"] = min(
+                    item["end_seconds"], item["start_seconds"] + (tgt * item["playback_rate"]) - 1e-4
+                )
 
         if any(rendered_seconds(item) > target_durations[item["scene_number"]] + _EDL_EPSILON for item in plan):
             raise ValueError("Edit decision list exceeds a scene's pre-directed target duration")
@@ -513,8 +605,31 @@ class JobRunner:
 
         if len(plan) <= 30:
             filters = build_assemble_filters(plan, [clip_has_audio(clip) for clip in inputs])
-            filters.append("".join(f"[v{index}][a{index}]" for index in range(len(plan))) + f"concat=n={len(plan)}:v=1:a=1[edited_video][edited_audio]")
-            command = [ffmpeg, "-y"] + [argument for clip in inputs for argument in ("-i", str(clip))] + ["-filter_complex", ";".join(filters), "-map", "[edited_video]", "-map", "[edited_audio]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final_video)]
+            filters.append(
+                "".join(f"[v{index}][a{index}]" for index in range(len(plan)))
+                + f"concat=n={len(plan)}:v=1:a=1[edited_video][edited_audio]"
+            )
+            command = (
+                [ffmpeg, "-y"]
+                + [argument for clip in inputs for argument in ("-i", str(clip))]
+                + [
+                    "-filter_complex",
+                    ";".join(filters),
+                    "-map",
+                    "[edited_video]",
+                    "-map",
+                    "[edited_audio]",
+                    "-c:v",
+                    "libx264",
+                    "-c:a",
+                    "aac",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-movflags",
+                    "+faststart",
+                    str(final_video),
+                ]
+            )
             completed = subprocess.run(command, capture_output=True, text=True, timeout=1800)
             if completed.returncode != 0 or not final_video.is_file():
                 raise RuntimeError(f"FFmpeg assembly failed: {completed.stderr[-1000:]}")
@@ -527,27 +642,103 @@ class JobRunner:
                 chunk_inputs = [clips_by_scene[item["scene_number"]] for item in chunk_plan]
                 chunk_video = output_dir / f"assembly_chunk_{chunk_idx // chunk_size:03d}.mp4"
                 c_filters = build_assemble_filters(chunk_plan, [clip_has_audio(c) for c in chunk_inputs])
-                c_filters.append("".join(f"[v{i}][a{i}]" for i in range(len(chunk_plan))) + f"concat=n={len(chunk_plan)}:v=1:a=1[c_vid][c_aud]")
-                c_cmd = [ffmpeg, "-y"] + [arg for c in chunk_inputs for arg in ("-i", str(c))] + ["-filter_complex", ";".join(c_filters), "-map", "[c_vid]", "-map", "[c_aud]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(chunk_video)]
+                c_filters.append(
+                    "".join(f"[v{i}][a{i}]" for i in range(len(chunk_plan)))
+                    + f"concat=n={len(chunk_plan)}:v=1:a=1[c_vid][c_aud]"
+                )
+                c_cmd = (
+                    [ffmpeg, "-y"]
+                    + [arg for c in chunk_inputs for arg in ("-i", str(c))]
+                    + [
+                        "-filter_complex",
+                        ";".join(c_filters),
+                        "-map",
+                        "[c_vid]",
+                        "-map",
+                        "[c_aud]",
+                        "-c:v",
+                        "libx264",
+                        "-c:a",
+                        "aac",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-movflags",
+                        "+faststart",
+                        str(chunk_video),
+                    ]
+                )
                 c_run = subprocess.run(c_cmd, capture_output=True, text=True, timeout=1800)
                 if c_run.returncode != 0 or not chunk_video.is_file():
                     raise RuntimeError(f"FFmpeg chunk assembly failed (chunk {chunk_idx}): {c_run.stderr[-1000:]}")
                 chunk_files.append(chunk_video)
 
             # Concat the chunk files
-            concat_filters = ["".join(f"[{i}:v][{i}:a]" for i in range(len(chunk_files))) + f"concat=n={len(chunk_files)}:v=1:a=1[v][a]"]
-            merge_cmd = [ffmpeg, "-y"] + [arg for cf in chunk_files for arg in ("-i", str(cf))] + ["-filter_complex", ";".join(concat_filters), "-map", "[v]", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-movflags", "+faststart", str(final_video)]
+            concat_filters = [
+                "".join(f"[{i}:v][{i}:a]" for i in range(len(chunk_files)))
+                + f"concat=n={len(chunk_files)}:v=1:a=1[v][a]"
+            ]
+            merge_cmd = (
+                [ffmpeg, "-y"]
+                + [arg for cf in chunk_files for arg in ("-i", str(cf))]
+                + [
+                    "-filter_complex",
+                    ";".join(concat_filters),
+                    "-map",
+                    "[v]",
+                    "-map",
+                    "[a]",
+                    "-c:v",
+                    "copy",
+                    "-c:a",
+                    "aac",
+                    "-movflags",
+                    "+faststart",
+                    str(final_video),
+                ]
+            )
             completed = subprocess.run(merge_cmd, capture_output=True, text=True, timeout=1800)
             if completed.returncode != 0 or not final_video.is_file():
-                merge_cmd = [ffmpeg, "-y"] + [arg for cf in chunk_files for arg in ("-i", str(cf))] + ["-filter_complex", ";".join(concat_filters), "-map", "[v]", "-map", "[a]", "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(final_video)]
+                merge_cmd = (
+                    [ffmpeg, "-y"]
+                    + [arg for cf in chunk_files for arg in ("-i", str(cf))]
+                    + [
+                        "-filter_complex",
+                        ";".join(concat_filters),
+                        "-map",
+                        "[v]",
+                        "-map",
+                        "[a]",
+                        "-c:v",
+                        "libx264",
+                        "-c:a",
+                        "aac",
+                        "-pix_fmt",
+                        "yuv420p",
+                        "-movflags",
+                        "+faststart",
+                        str(final_video),
+                    ]
+                )
                 completed = subprocess.run(merge_cmd, capture_output=True, text=True, timeout=1800)
                 if completed.returncode != 0 or not final_video.is_file():
                     raise RuntimeError(f"FFmpeg chunk merge failed: {completed.stderr[-1000:]}")
         self.repository.update_episode(episode["id"], output_path=str(final_video))
         if episode["status"] != EpisodeStatus.AWAITING_FINAL_REVIEW.value:
-            self.repository.transition_episode(episode["id"], EpisodeStatus.VIDEO_READY, note="Rendered user-uploaded clips with FFmpeg; original clip audio preserved")
-            self.repository.transition_episode(episode["id"], EpisodeStatus.AWAITING_FINAL_REVIEW, note="Final video with original clip audio and edit script ready")
-        return {"final_video": str(final_video), "edit_script": str(output_dir / "edit_script.md"), "clip_count": len(plan)}
+            self.repository.transition_episode(
+                episode["id"],
+                EpisodeStatus.VIDEO_READY,
+                note="Rendered user-uploaded clips with FFmpeg; original clip audio preserved",
+            )
+            self.repository.transition_episode(
+                episode["id"],
+                EpisodeStatus.AWAITING_FINAL_REVIEW,
+                note="Final video with original clip audio and edit script ready",
+            )
+        return {
+            "final_video": str(final_video),
+            "edit_script": str(output_dir / "edit_script.md"),
+            "clip_count": len(plan),
+        }
 
     def _run_audio(self, job: dict[str, Any]) -> dict[str, Any]:
         episode = self._episode(job)
@@ -567,15 +758,8 @@ class JobRunner:
         master_audio = output_dir / "full_voiceover.mp3"
         voice = getattr(getattr(self.audio_provider, "settings", None), "default_voice", "mrkane")
 
-        if script:
-            if not (master_audio.is_file() and master_audio.stat().st_size > 1000):
-                self.audio_provider.generate_speech(script, master_audio, voice=voice)
-            try:
-                master_duration = clip_duration_seconds(master_audio)
-            except Exception:
-                master_duration = max(1.0, round(len(script.split()) / 2.5, 2))
-        else:
-            master_duration = 0.0
+        if script and not (master_audio.is_file() and master_audio.stat().st_size > 1000):
+            self.audio_provider.generate_speech(script, master_audio, voice=voice)
 
         clips: list[dict[str, Any]] = []
         total_duration = 0.0
@@ -600,12 +784,14 @@ class JobRunner:
             scene["audio_path"] = str(audio_file)
             scene["audio_duration_seconds"] = dur
             total_duration += dur
-            clips.append({
-                "scene_number": num,
-                "path": str(audio_file),
-                "duration_seconds": dur,
-                "narration": narration,
-            })
+            clips.append(
+                {
+                    "scene_number": num,
+                    "path": str(audio_file),
+                    "duration_seconds": dur,
+                    "narration": narration,
+                }
+            )
             self.repository.update_episode(episode["id"], storyboard=scenes)
 
         self.repository.update_episode(episode["id"], storyboard=scenes, output_path=f"outputs/{episode['id']}")
@@ -684,9 +870,7 @@ class JobRunner:
                                 image_path, motion_prompt, video_path, duration_s=dur_s
                             )
                         except TypeError:
-                            generated = self.media_provider.generate_video(
-                                image_path, motion_prompt, video_path
-                            )
+                            generated = self.media_provider.generate_video(image_path, motion_prompt, video_path)
                         break
                     except Exception as exc:
                         last_exc = exc
@@ -718,11 +902,20 @@ class JobRunner:
         manifest_path = self.repository.database_path.parent / "outputs" / episode["id"] / "video_manifest.json"
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(
-            json.dumps({"episode_id": episode["id"], "provider": getattr(self.media_provider, "name", "custom"), "clips": clips}, indent=2),
+            json.dumps(
+                {
+                    "episode_id": episode["id"],
+                    "provider": getattr(self.media_provider, "name", "custom"),
+                    "clips": clips,
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
         self.repository.transition_episode(episode["id"], EpisodeStatus.VIDEO_READY, note="Video composition rendered")
-        self.repository.transition_episode(episode["id"], EpisodeStatus.AWAITING_FINAL_REVIEW, note="Video is ready for final review")
+        self.repository.transition_episode(
+            episode["id"], EpisodeStatus.AWAITING_FINAL_REVIEW, note="Video is ready for final review"
+        )
         return {
             "video_manifest": str(manifest_path),
             "clip_count": len(scenes),
@@ -730,13 +923,17 @@ class JobRunner:
         }
 
     def _artifact_path(self, episode_id: str, asset_kind: str, number: int, suffix: str) -> Path:
-        return self.repository.database_path.parent / "outputs" / episode_id / asset_kind / f"scene-{number:03d}{suffix}"
+        return (
+            self.repository.database_path.parent / "outputs" / episode_id / asset_kind / f"scene-{number:03d}{suffix}"
+        )
 
     def _run_publish(self, job: dict[str, Any]) -> dict[str, Any]:
         episode = self._episode(job)
         if episode["status"] != EpisodeStatus.FINAL_APPROVED.value:
             raise ValueError("Publishing requires final approval")
-        self.repository.transition_episode(episode["id"], EpisodeStatus.PUBLISHED, note="Marked published; connect a YouTube provider to upload")
+        self.repository.transition_episode(
+            episode["id"], EpisodeStatus.PUBLISHED, note="Marked published; connect a YouTube provider to upload"
+        )
         return {"publication": "recorded", "provider": "manual"}
 
 
@@ -768,7 +965,7 @@ def _segment_script_sentences(script: str, target_words: int = 16) -> list[str]:
                 current = []
                 current_words = 0
             for i in range(0, len(s_words), target_words):
-                chunks.append(" ".join(s_words[i:i + target_words]))
+                chunks.append(" ".join(s_words[i : i + target_words]))
             continue
 
         w_count = len(s_words)
@@ -810,13 +1007,15 @@ def _fallback_storyboard_scenes(script: str, client: SystemOneClient | None = No
 
     scenes: list[dict[str, Any]] = []
     for index, chunk_text in enumerate(chunks):
-        scenes.append({
-            "number": index + 1,
-            "narration": chunk_text,
-            "story_beat": chunk_text,
-            "negative_prompt": NANOBANANA_NEGATIVE_PROMPT,
-            "asset_status": "pending",
-        })
+        scenes.append(
+            {
+                "number": index + 1,
+                "narration": chunk_text,
+                "story_beat": chunk_text,
+                "negative_prompt": NANOBANANA_NEGATIVE_PROMPT,
+                "asset_status": "pending",
+            }
+        )
 
     # Pace first: the director's shot_type is what tells the prompt builder whether
     # the protagonist is on screen. Building the prompt earlier forced him into every frame.
@@ -846,7 +1045,7 @@ def _describe_scenes(scene_texts: list[str], llm_provider: LLMProvider) -> dict[
     )
     descriptions: dict[int, str] = {}
     for start in range(0, len(scene_texts), STORYBOARD_LLM_BATCH_SCENES):
-        batch = scene_texts[start:start + STORYBOARD_LLM_BATCH_SCENES]
+        batch = scene_texts[start : start + STORYBOARD_LLM_BATCH_SCENES]
         body = "\n".join(f"{start + offset + 1}. {text}" for offset, text in enumerate(batch))
         rows = _markdown_rows(
             llm_provider.generate(

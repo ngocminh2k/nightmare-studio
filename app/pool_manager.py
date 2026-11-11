@@ -12,6 +12,7 @@ Config via env vars:
 
 Run: python -m uvicorn app.pool_manager:app --host 127.0.0.1 --port 8888
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -45,11 +46,13 @@ def _parse_accounts() -> list[dict]:
             port_str, project_id = entry.split(":", 1)
         else:
             port_str, project_id = entry, ""
-        result.append({
-            "id": f"acct-{i+1:02d}",
-            "port": int(port_str.strip()),
-            "project_id": project_id.strip(),
-        })
+        result.append(
+            {
+                "id": f"acct-{i + 1:02d}",
+                "port": int(port_str.strip()),
+                "project_id": project_id.strip(),
+            }
+        )
     return result or [{"id": "acct-01", "port": 8100, "project_id": ""}]
 
 
@@ -61,7 +64,7 @@ class AccountState:
     id: str
     port: int
     project_id: str
-    status: str = "offline"       # offline | ready | active | low | depleted
+    status: str = "offline"  # offline | ready | active | low | depleted
     credits: Optional[int] = None
     connected: bool = False
     jobs_done: int = 0
@@ -128,11 +131,7 @@ async def poll_account(acct: AccountState) -> None:
 
     # flowkit /api/flow/credits returns tier info, not a numeric count
     # Try numeric keys first (future-proofing), fall back to tier mapping
-    credits_num = (
-        cred_data.get("credits")
-        or cred_data.get("remaining")
-        or cred_data.get("balance")
-    )
+    credits_num = cred_data.get("credits") or cred_data.get("remaining") or cred_data.get("balance")
     tier = cred_data.get("userPaygateTier") or cred_data.get("tier") or ""
 
     if isinstance(credits_num, (int, float)):
@@ -145,7 +144,7 @@ async def poll_account(acct: AccountState) -> None:
         if "TIER_TWO" in tier_upper or "TIER_ONE" in tier_upper:
             acct.credits = 999  # synthetic: healthy
         elif "TIER_ZERO" in tier_upper or "FREE" in tier_upper:
-            acct.credits = 5   # synthetic: low
+            acct.credits = 5  # synthetic: low
         else:
             acct.credits = 100  # unknown tier, assume ok
         tier_status = tier
@@ -263,12 +262,15 @@ async def manual_switch(target_id: str):
         if cur and cur is not nxt:
             cur.status = "ready" if (cur.credits or 0) >= LOW_CREDIT_THRESHOLD else "low"
         nxt.status = "active"
-        switch_log.insert(0, {
-            "ts": time.strftime("%H:%M:%S"),
-            "from": cur.id if cur else None,
-            "to": nxt.id,
-            "reason": "manual",
-        })
+        switch_log.insert(
+            0,
+            {
+                "ts": time.strftime("%H:%M:%S"),
+                "from": cur.id if cur else None,
+                "to": nxt.id,
+                "reason": "manual",
+            },
+        )
         return {"ok": True, "active": target_id}
 
 

@@ -51,11 +51,13 @@ def _discover_source(repository: StudioRepository):
             url = data.get("url", "").strip()
             if url and url not in existing and data.get("text"):
                 from .discovery import SourceStory
+
                 return SourceStory(title=data.get("title", "Untitled").strip(), url=url, text=data["text"].strip())
         except Exception:
             pass
     try:
         from .firecrawl_discovery import FirecrawlSourceProvider
+
         if FirecrawlSourceProvider.available():
             return FirecrawlSourceProvider().discover(existing)
     except Exception:
@@ -76,7 +78,12 @@ def cmd_produce(args: argparse.Namespace, repository: StudioRepository) -> dict:
         project = _resolve_project(repository, args.project_id, args.project_name)
         source = _discover_source(repository)
         episode = service.produce(project["id"], source, approve_all=args.approve_all)
-    return {"id": episode["id"], "title": episode["title"], "status": episode["status"], "output_path": episode["output_path"]}
+    return {
+        "id": episode["id"],
+        "title": episode["title"],
+        "status": episode["status"],
+        "output_path": episode["output_path"],
+    }
 
 
 def cmd_queue(args: argparse.Namespace, repository: StudioRepository) -> dict:
@@ -89,14 +96,16 @@ def cmd_queue(args: argparse.Namespace, repository: StudioRepository) -> dict:
     # Try Firecrawl first, fallback to CamoufoxRedditSourceProvider
     story = None
     try:
-        from .firecrawl_discovery import FirecrawlSourceProvider, _scrape_post, _api_key
+        from .firecrawl_discovery import FirecrawlSourceProvider, _scrape_post
+
         if FirecrawlSourceProvider.available():
             from .discovery import SourceStory
+
             md = _scrape_post(url)
             if md and len(md) > 200:
-                lines = [l for l in md.splitlines() if not l.startswith("http") and len(l) > 20]
+                lines = [ln for ln in md.splitlines() if not ln.startswith("http") and len(ln) > 20]
                 text = "\n".join(lines[:200]).strip()
-                title_line = next((l for l in md.splitlines() if l.startswith("# ")), "")
+                title_line = next((ln for ln in md.splitlines() if ln.startswith("# ")), "")
                 title = title_line.lstrip("# ").strip() or url
                 story = SourceStory(title=title, url=url, text=text)
     except Exception:
@@ -105,11 +114,14 @@ def cmd_queue(args: argparse.Namespace, repository: StudioRepository) -> dict:
     if story is None:
         try:
             from .discovery import CamoufoxRedditSourceProvider
+
             story = CamoufoxRedditSourceProvider().scrape_post(url)
         except Exception as exc:
             return {"queued": False, "reason": str(exc), "url": url}
 
-    project = _resolve_project(repository, getattr(args, "project_id", None), getattr(args, "project_name", "Night Shift"))
+    project = _resolve_project(
+        repository, getattr(args, "project_id", None), getattr(args, "project_name", "Night Shift")
+    )
     # Store the story as a queued episode stub
     episode = repository.create_episode(
         project_id=project["id"],
@@ -125,7 +137,13 @@ def cmd_status(args: argparse.Namespace, repository: StudioRepository) -> list:
     episodes = repository.list_episodes()
     rows = episodes[:limit] if limit else episodes
     return [
-        {"id": ep["id"], "title": ep["title"], "status": ep["status"], "updated_at": ep.get("updated_at"), "output_path": ep.get("output_path")}
+        {
+            "id": ep["id"],
+            "title": ep["title"],
+            "status": ep["status"],
+            "updated_at": ep.get("updated_at"),
+            "output_path": ep.get("output_path"),
+        }
         for ep in rows
     ]
 
@@ -141,7 +159,6 @@ def rate_episode_blind(episode_id: str, repository: StudioRepository) -> dict:
         narration = scene.get("narration") or scene.get("narration_text") or ""
         story_beat = scene.get("story_beat") or scene.get("beat") or ""
         visual = scene.get("visual_description") or scene.get("image_prompt") or ""
-        shot = scene.get("shot_type") or ""
 
         beat = _detect_beat(f"{story_beat} {narration}", visual)
         lighting, palette = _BEAT_LIGHTING.get(beat, _BEAT_LIGHTING["default"])
@@ -149,16 +166,18 @@ def rate_episode_blind(episode_id: str, repository: StudioRepository) -> dict:
         # Image prompt: prefer explicit field, else compose from visual
         image_prompt = scene.get("image_prompt") or visual or ""
 
-        scene_reviews.append({
-            "scene_index": i,
-            "scene_id": scene.get("id") or scene.get("scene_id"),
-            "narration": narration,
-            "story_beat": story_beat,
-            "detected_beat": beat,
-            "lighting": lighting,
-            "palette": palette,
-            "image_prompt": image_prompt,
-        })
+        scene_reviews.append(
+            {
+                "scene_index": i,
+                "scene_id": scene.get("id") or scene.get("scene_id"),
+                "narration": narration,
+                "story_beat": story_beat,
+                "detected_beat": beat,
+                "lighting": lighting,
+                "palette": palette,
+                "image_prompt": image_prompt,
+            }
+        )
 
     return {
         "episode_id": episode_id,
@@ -184,7 +203,9 @@ def main() -> int:
     # produce
     p_produce = sub.add_parser("produce", help="Discover and produce a new episode")
     p_produce.add_argument("--episode-id", help="Resume an existing episode after a transient provider failure")
-    p_produce.add_argument("--rebuild-package", action="store_true", help="Rebuild deterministic package artifacts before final review")
+    p_produce.add_argument(
+        "--rebuild-package", action="store_true", help="Rebuild deterministic package artifacts before final review"
+    )
     p_produce.add_argument("--project-id")
     p_produce.add_argument("--project-name", default="Night Shift")
     p_produce.add_argument("--approve-all", action="store_true", help="Approve script and assets, but never publish")

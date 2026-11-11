@@ -41,40 +41,88 @@ VICTOR_KANE_CHARACTER_SPEC = (
 
 # Emotional beat → (lighting description, palette description)
 _BEAT_LIGHTING: dict[str, tuple[str, str]] = {
-    "horror":      ("low-angle lantern casting long harsh shadows upward, heavy black fill",
-                    "charcoal black, cold slate blue, trace amber — no warm tones"),
-    "dread":       ("diffuse moonlight through broken glass, deep shadow pools, cold rim",
-                    "desaturated steel grey, midnight blue, pale silver highlights"),
-    "shock":       ("sudden harsh overhead fluorescent, flat unforgiving exposure",
-                    "bleached white highlights, deep charcoal shadows, no mid-tones"),
-    "revelation":  ("sharp directional key light from off-screen left, strong rim light",
-                    "high contrast: white-ivory key vs. charcoal fill, warm amber rim"),
-    "memory":      ("warm diffuse interior glow, soft vignette edges, gentle god rays",
-                    "muted amber, sepia-cream, soft charcoal shadows"),
-    "violence":    ("strobing red practical light, harsh side-lighting, deep black fill",
-                    "crimson red accent, charcoal black, no blue — danger palette"),
-    "tension":     ("single narrow practical beam in darkness, most frame in black",
-                    "90% black, cold grey mid-tone, thin white specular on key feature"),
-    "eerie":       ("cold moonlight through fog, volumetric mist, deep rim from below",
-                    "blue-grey haze, muted teal, charcoal blacks, no warm accent"),
-    "action":      ("dynamic side-lighting, motion blur suggestion on edges, energetic rim",
-                    "high contrast charcoal and blue-grey, sharp white specular"),
-    "default":     ("dramatic cinematic chiaroscuro, directional key light casting long shadow",
-                    "charcoal black, cold slate blue, restrained amber highlight, deep-red accent"),
+    "horror": (
+        "low-angle lantern casting long harsh shadows upward, heavy black fill",
+        "charcoal black, cold slate blue, trace amber — no warm tones",
+    ),
+    "dread": (
+        "diffuse moonlight through broken glass, deep shadow pools, cold rim",
+        "desaturated steel grey, midnight blue, pale silver highlights",
+    ),
+    "shock": (
+        "sudden harsh overhead fluorescent, flat unforgiving exposure",
+        "bleached white highlights, deep charcoal shadows, no mid-tones",
+    ),
+    "revelation": (
+        "sharp directional key light from off-screen left, strong rim light",
+        "high contrast: white-ivory key vs. charcoal fill, warm amber rim",
+    ),
+    "memory": (
+        "warm diffuse interior glow, soft vignette edges, gentle god rays",
+        "muted amber, sepia-cream, soft charcoal shadows",
+    ),
+    "violence": (
+        "strobing red practical light, harsh side-lighting, deep black fill",
+        "crimson red accent, charcoal black, no blue — danger palette",
+    ),
+    "tension": (
+        "single narrow practical beam in darkness, most frame in black",
+        "90% black, cold grey mid-tone, thin white specular on key feature",
+    ),
+    "eerie": (
+        "cold moonlight through fog, volumetric mist, deep rim from below",
+        "blue-grey haze, muted teal, charcoal blacks, no warm accent",
+    ),
+    "action": (
+        "dynamic side-lighting, motion blur suggestion on edges, energetic rim",
+        "high contrast charcoal and blue-grey, sharp white specular",
+    ),
+    "default": (
+        "dramatic cinematic chiaroscuro, directional key light casting long shadow",
+        "charcoal black, cold slate blue, restrained amber highlight, deep-red accent",
+    ),
 }
 
 _BEAT_KEYWORDS: list[tuple[str, str]] = [
     # (keyword in text, beat key) — order matters: first match wins
     # Replace hyphens so "blood-soaked" still matches "blood"
-    ("horror", "horror"), ("scream", "horror"), ("monster", "horror"), ("creature", "horror"),
-    ("dread", "dread"), ("fear", "dread"), ("ominous", "dread"), ("haunted", "dread"),
-    ("shock", "shock"), ("startl", "shock"), ("gasped", "shock"), ("sudden", "shock"),
-    ("reveal", "revelation"), ("discover", "revelation"), ("truth", "revelation"), ("realize", "revelation"),
-    ("memory", "memory"), ("flashback", "memory"), ("remember", "memory"), ("past", "memory"),
-    ("blood", "violence"), ("attack", "violence"), ("stab", "violence"), ("slaughter", "violence"),
-    ("tension", "tension"), ("stalked", "tension"), ("whisper", "tension"), ("silent", "tension"),
-    ("eerie", "eerie"), ("ghost", "eerie"), ("spirit", "eerie"), ("apparit", "eerie"),
-    ("chase", "action"), ("fight", "action"), ("escape", "action"), ("running", "action"), ("sprint", "action"),
+    ("horror", "horror"),
+    ("scream", "horror"),
+    ("monster", "horror"),
+    ("creature", "horror"),
+    ("dread", "dread"),
+    ("fear", "dread"),
+    ("ominous", "dread"),
+    ("haunted", "dread"),
+    ("shock", "shock"),
+    ("startl", "shock"),
+    ("gasped", "shock"),
+    ("sudden", "shock"),
+    ("reveal", "revelation"),
+    ("discover", "revelation"),
+    ("truth", "revelation"),
+    ("realize", "revelation"),
+    ("memory", "memory"),
+    ("flashback", "memory"),
+    ("remember", "memory"),
+    ("past", "memory"),
+    ("blood", "violence"),
+    ("attack", "violence"),
+    ("stab", "violence"),
+    ("slaughter", "violence"),
+    ("tension", "tension"),
+    ("stalked", "tension"),
+    ("whisper", "tension"),
+    ("silent", "tension"),
+    ("eerie", "eerie"),
+    ("ghost", "eerie"),
+    ("spirit", "eerie"),
+    ("apparit", "eerie"),
+    ("chase", "action"),
+    ("fight", "action"),
+    ("escape", "action"),
+    ("running", "action"),
+    ("sprint", "action"),
 ]
 
 
@@ -101,13 +149,32 @@ def _detect_beat(text: str, visual: str = "") -> str:
 def _is_environment_only(visual: str, shot: str, action: str = "") -> bool:
     """Return True when the shot is clearly an establishing/environment frame with no subject."""
     combined = (visual + " " + shot + " " + action).lower()
-    env_signals = ("wide establishing", "empty", "abandoned exterior", "distant landscape",
-                   "aerial view", "cityscape", "no figures", "unpopulated", "establishing shot")
+    env_signals = (
+        "wide establishing",
+        "empty",
+        "abandoned exterior",
+        "distant landscape",
+        "aerial view",
+        "cityscape",
+        "no figures",
+        "unpopulated",
+        "establishing shot",
+    )
     # Only specific subject words — "figure" alone is too ambiguous ("no figures" hits it).
     # First-person narration pronouns ("I", "my") are NOT on-screen presence, so they are
     # excluded: they used to mark every scene as subject-bearing and force Victor into all of them.
-    subject_signals = ("victor", "investigator", " man ", " woman ", "character",
-                       " he ", " she ", " they ", "his ", "her ")
+    subject_signals = (
+        "victor",
+        "investigator",
+        " man ",
+        " woman ",
+        "character",
+        " he ",
+        " she ",
+        " they ",
+        "his ",
+        "her ",
+    )
     has_env = any(k in combined for k in env_signals)
     has_subject = any(k in combined for k in subject_signals)
     return has_env and not has_subject
@@ -136,10 +203,25 @@ def character_present(scene: dict[str, Any]) -> bool:
         detail_text = (visual + " " + action).lower()
         if any(k in detail_text for k in ("victor", "investigator")):
             return True
-        return any(k in detail_text for k in ("his hand", "her hand", "his finger", "her finger",
-                                              "his face", "her face", "his eye", "her eye",
-                                              "his ring", "her ring", "his skin", "her skin",
-                                              "his scar", "her scar"))
+        return any(
+            k in detail_text
+            for k in (
+                "his hand",
+                "her hand",
+                "his finger",
+                "her finger",
+                "his face",
+                "her face",
+                "his eye",
+                "her eye",
+                "his ring",
+                "her ring",
+                "his skin",
+                "her skin",
+                "his scar",
+                "her scar",
+            )
+        )
 
     return not _is_environment_only(visual, shot, action)
 
@@ -155,8 +237,8 @@ def _extract_action_desc(scene: dict[str, Any]) -> str:
     if story_beat and len(story_beat) > 15:
         return story_beat[:250]
     if narration and len(narration) > 15:
-        cleaned = re.sub(r'["\']', '', narration)
-        sentences = re.split(r'(?<=[.!?])\s+', cleaned)
+        cleaned = re.sub(r'["\']', "", narration)
+        sentences = re.split(r"(?<=[.!?])\s+", cleaned)
         return " ".join(sentences[:2])[:200]
     return "An ominous investigation unfolds in shadows."
 
@@ -180,14 +262,15 @@ def build_nanobanana_image_prompt(scene: dict[str, Any]) -> str:
     shot = str(scene.get("shot") or "Cinematic horror medium shot").strip()
     action_desc = _extract_action_desc(scene)
     visual = str(scene.get("visual_description") or "").strip()
-    shot_str = str(scene.get("shot") or "").strip()
 
     # Derive emotional beat
     # Priority: [BEAT:xxx] tag in visual_description → keyword scan of story_beat+narration
-    beat_source = " ".join([
-        str(scene.get("story_beat") or ""),
-        str(scene.get("narration") or ""),
-    ])
+    beat_source = " ".join(
+        [
+            str(scene.get("story_beat") or ""),
+            str(scene.get("narration") or ""),
+        ]
+    )
     beat = _detect_beat(beat_source, visual=visual)
     lighting, palette = _BEAT_LIGHTING[beat]
 
@@ -230,10 +313,26 @@ def build_nanobanana_negative_prompt() -> str:
 # Self-check
 if __name__ == "__main__":
     _scenes = [
-        {"shot": "Low-angle medium shot", "story_beat": "Victor discovers the blood-soaked letter", "visual_description": ""},
-        {"shot": "Wide establishing", "visual_description": "wide establishing shot of abandoned exterior building, no figures", "narration": ""},
-        {"shot": "Close-up", "narration": "I remembered her face. The warmth of that afternoon felt like another life.", "visual_description": ""},
-        {"shot": "Medium shot", "story_beat": "A ghost appears in the hallway", "visual_description": "eerie spirit materializes in fog"},
+        {
+            "shot": "Low-angle medium shot",
+            "story_beat": "Victor discovers the blood-soaked letter",
+            "visual_description": "",
+        },
+        {
+            "shot": "Wide establishing",
+            "visual_description": "wide establishing shot of abandoned exterior building, no figures",
+            "narration": "",
+        },
+        {
+            "shot": "Close-up",
+            "narration": "I remembered her face. The warmth of that afternoon felt like another life.",
+            "visual_description": "",
+        },
+        {
+            "shot": "Medium shot",
+            "story_beat": "A ghost appears in the hallway",
+            "visual_description": "eerie spirit materializes in fog",
+        },
     ]
     for s in _scenes:
         p = build_nanobanana_image_prompt(s)
@@ -244,21 +343,33 @@ if __name__ == "__main__":
         print(p[:120], "...\n")
 
     # Framing decides who is in frame, not the narration wording.
-    _portrait = {"shot_type": "character_portrait", "shot": "Character portrait shot",
-                 "narration": "I could not look away from him."}
-    _wide = {"shot_type": "wide_establishing", "shot": "Wide establishing shot",
-             "narration": "I watched the manor sink into the fog."}
-    _detail = {"shot_type": "close_up_detail", "shot": "Close-up detail shot",
-               "visual_description": "a rusted iron key resting on wet stone"}
+    _portrait = {
+        "shot_type": "character_portrait",
+        "shot": "Character portrait shot",
+        "narration": "I could not look away from him.",
+    }
+    _wide = {
+        "shot_type": "wide_establishing",
+        "shot": "Wide establishing shot",
+        "narration": "I watched the manor sink into the fog.",
+    }
+    _detail = {
+        "shot_type": "close_up_detail",
+        "shot": "Close-up detail shot",
+        "visual_description": "a rusted iron key resting on wet stone",
+    }
     assert character_present(_portrait) is True
     assert character_present(_wide) is False
     assert character_present(_detail) is False
 
     # A non-character shot must not name him, or the reference anchor pulls him back in.
     _wide_prompt = build_nanobanana_image_prompt(
-        {"shot_type": "wide_establishing", "shot": "Wide establishing shot",
-         "visual_description": "wide establishing shot of the drowned manor, no figures",
-         "narration": "Victor watched the manor sink into the fog."}
+        {
+            "shot_type": "wide_establishing",
+            "shot": "Wide establishing shot",
+            "visual_description": "wide establishing shot of the drowned manor, no figures",
+            "narration": "Victor watched the manor sink into the fog.",
+        }
     )
     assert "Victor" not in _wide_prompt
     assert "No person in frame" in _wide_prompt

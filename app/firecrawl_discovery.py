@@ -3,6 +3,7 @@
 Set FIRECRAWL_API_KEY in .env. Discovers r/nosleep stories via Firecrawl search/scrape.
 Falls back to existing RedditSourceProvider if key not set.
 """
+
 from __future__ import annotations
 
 import json
@@ -46,11 +47,14 @@ def _scrape_post(url: str) -> str:
 def discover_firecrawl(existing_urls: set[str]) -> SourceStory:
     """Find an uncrawled r/nosleep story via Firecrawl search."""
     # Search for nosleep horror stories
-    result = _post("/search", {
-        "query": "site:reddit.com/r/nosleep horror story",
-        "limit": 20,
-        "scrapeOptions": {"formats": ["markdown"]},
-    })
+    result = _post(
+        "/search",
+        {
+            "query": "site:reddit.com/r/nosleep horror story",
+            "limit": 20,
+            "scrapeOptions": {"formats": ["markdown"]},
+        },
+    )
     posts = result.get("data") or []
 
     for post in posts:
@@ -70,7 +74,7 @@ def discover_firecrawl(existing_urls: set[str]) -> SourceStory:
                 continue
 
         # Strip markdown headers/metadata, keep body
-        lines = [l for l in md.splitlines() if not l.startswith("http") and len(l) > 20]
+        lines = [ln for ln in md.splitlines() if not ln.startswith("http") and len(ln) > 20]
         text = "\n".join(lines[:200]).strip()
         if len(text) > 500:
             return SourceStory(title=title.strip(), url=url, text=text)

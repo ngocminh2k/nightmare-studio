@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Any, Callable
 from urllib.request import Request, urlopen
 
 from bs4 import BeautifulSoup
@@ -48,6 +48,7 @@ class CamoufoxRedditSourceProvider:
         # 1. Try Camoufox anti-detect browser
         try:
             from camoufox.sync_api import Camoufox
+
             camoufox_cm = Camoufox(headless=True)
             browser = camoufox_cm.__enter__()
             page = browser.new_page()
@@ -62,9 +63,7 @@ class CamoufoxRedditSourceProvider:
             page = context.new_page()
             return browser, page
         except Exception as exc:
-            raise RuntimeError(
-                f"Failed to launch Camoufox or connect to Chrome CDP at {self.cdp_url}: {exc}"
-            ) from exc
+            raise RuntimeError(f"Failed to launch Camoufox or connect to Chrome CDP at {self.cdp_url}: {exc}") from exc
 
     def scrape_post(self, url: str) -> SourceStory:
         """Scrape full story text and title from a specific Reddit post URL."""

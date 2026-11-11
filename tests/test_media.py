@@ -9,11 +9,11 @@ import pytest
 
 _spec = importlib.util.find_spec("playwright.sync_api")
 if _spec is not None:
-    import playwright.sync_api
+    import playwright.sync_api  # noqa: E402
 else:
-    playwright = pytest.importorskip("playwright")
+    playwright = pytest.importorskip("playwright")  # noqa: E402
 
-from app.media import (
+from app.media import (  # noqa: E402
     CanvasCDPMediaProvider,
     CanvasCDPSettings,
     DeterministicMediaProvider,
@@ -123,9 +123,7 @@ def test_google_flow_resolves_a_relative_artifact_url_against_its_workspace_page
 
 
 def test_google_flow_uses_the_authenticated_browser_session_for_its_media_endpoint():
-    assert GoogleFlowCDPMediaProvider._requires_browser_fetch(
-        "/fx/api/trpc/media.getMediaUrlRedirect?name=artifact"
-    )
+    assert GoogleFlowCDPMediaProvider._requires_browser_fetch("/fx/api/trpc/media.getMediaUrlRedirect?name=artifact")
 
 
 def test_google_flow_downloads_protected_artifacts_through_the_browser_request_context(tmp_path):
@@ -217,7 +215,13 @@ def test_google_flow_generates_image_and_video_through_the_authenticated_cdp_ses
             return "/fx/api/trpc/media.getMediaUrlRedirect?name=artifact" if name == "src" else None
 
         def evaluate_all(self, script):
-            return ["profile.jpg", *[f"/fx/api/trpc/media.getMediaUrlRedirect?name=scene-{number}" for number in range(page.generation, 0, -1)]]
+            return [
+                "profile.jpg",
+                *[
+                    f"/fx/api/trpc/media.getMediaUrlRedirect?name=scene-{number}"
+                    for number in range(page.generation, 0, -1)
+                ],
+            ]
 
         def locator(self, selector):
             return Locator(selector)
@@ -295,16 +299,18 @@ def test_google_flow_generates_image_and_video_through_the_authenticated_cdp_ses
     assert ("click", GoogleFlowCDPMediaProvider._REFERENCE_MENU_SELECTOR) in calls
     assert ("click", GoogleFlowCDPMediaProvider._REFERENCE_UPLOAD_SELECTOR) in calls
     assert ("click", GoogleFlowCDPMediaProvider._REFERENCE_CONFIRM_SELECTOR) in calls
-    assert calls.index(("fill", "A corridor")) < calls.index(("click", GoogleFlowCDPMediaProvider._REFERENCE_MENU_SELECTOR))
+    assert calls.index(("fill", "A corridor")) < calls.index(
+        ("click", GoogleFlowCDPMediaProvider._REFERENCE_MENU_SELECTOR)
+    )
     assert calls.index(("click", GoogleFlowCDPMediaProvider._REFERENCE_MENU_SELECTOR)) < calls.index(
         ("click", GoogleFlowCDPMediaProvider._REFERENCE_UPLOAD_SELECTOR)
     )
     assert calls.index(("click", GoogleFlowCDPMediaProvider._REFERENCE_UPLOAD_SELECTOR)) < calls.index(
         ("upload", (GoogleFlowCDPMediaProvider._REFERENCE_FILE_INPUT_SELECTOR, str(reference_path)))
     )
-    assert calls.index(("upload", (GoogleFlowCDPMediaProvider._REFERENCE_FILE_INPUT_SELECTOR, str(reference_path)))) < calls.index(
-        ("click", GoogleFlowCDPMediaProvider._REFERENCE_CONFIRM_SELECTOR)
-    )
+    assert calls.index(
+        ("upload", (GoogleFlowCDPMediaProvider._REFERENCE_FILE_INPUT_SELECTOR, str(reference_path)))
+    ) < calls.index(("click", GoogleFlowCDPMediaProvider._REFERENCE_CONFIRM_SELECTOR))
 
 
 def test_google_flow_uploads_the_mr_kane_reference_before_generating_an_image(monkeypatch, tmp_path):
@@ -421,9 +427,9 @@ def test_connect_cdp_auto_launches_browser_when_offline(monkeypatch):
             raise ConnectionRefusedError("Port 9222 not open")
         return mock_browser
 
-    mock_playwright = type("Playwright", (), {
-        "chromium": type("Chromium", (), {"connect_over_cdp": staticmethod(mock_connect)})()
-    })()
+    mock_playwright = type(
+        "Playwright", (), {"chromium": type("Chromium", (), {"connect_over_cdp": staticmethod(mock_connect)})()}
+    )()
 
     settings = CanvasCDPSettings(
         media_mode="canvas_cdp",
@@ -447,9 +453,9 @@ def test_connect_cdp_fails_closed_when_auto_launch_disabled():
     def mock_connect(url):
         raise ConnectionRefusedError("Port 9222 not open")
 
-    mock_playwright = type("Playwright", (), {
-        "chromium": type("Chromium", (), {"connect_over_cdp": staticmethod(mock_connect)})()
-    })()
+    mock_playwright = type(
+        "Playwright", (), {"chromium": type("Chromium", (), {"connect_over_cdp": staticmethod(mock_connect)})()}
+    )()
 
     settings = CanvasCDPSettings(
         media_mode="canvas_cdp",
@@ -646,7 +652,6 @@ def test_parse_motion_prompt_plan():
     with pytest.raises(ValueError, match="must provide one non-empty prompt for every scene"):
         parse_motion_prompt_plan('{"scenes": [{"number": 1, "motion_prompt": ""}]}', {1})
 
-
     from app.media import generate_veo_prompt_plan
 
     class FakeLLM:
@@ -675,11 +680,6 @@ def test_cdp_port_open_and_chrome_discovery(monkeypatch, tmp_path):
     custom_profile = tmp_path / "custom_profile"
     assert _discover_chrome_user_data_dir(str(custom_profile)) == custom_profile
     assert custom_profile.is_dir()
-
-
-
-
-
 
 
 def _write_account_registry(path: Path, active: int, accounts: list[dict[str, object]]) -> None:

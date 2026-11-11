@@ -116,7 +116,9 @@ class EpisodeUpdate(BaseModel):
 
 
 def create_app(database_path: str | Path | None = None, source_provider: Any | None = None) -> FastAPI:
-    db_path = Path(database_path or os.environ.get("NIGHTMARE_STUDIO_DB", Path(__file__).parents[1] / "data" / "studio.db"))
+    db_path = Path(
+        database_path or os.environ.get("NIGHTMARE_STUDIO_DB", Path(__file__).parents[1] / "data" / "studio.db")
+    )
     repository = StudioRepository(db_path)
     provider_settings = ProviderSettings.from_environment()
     media_settings = CanvasCDPSettings.from_environment()
@@ -142,7 +144,9 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
 
     def start_job_if_idle(episode_id: str, kind: str, background_tasks: BackgroundTasks) -> None:
         """Enqueue and run a job unless one of the same kind is already queued or running (re-upload guard)."""
-        if any(job["kind"] == kind and job["status"] in {"queued", "running"} for job in repository.list_jobs(episode_id)):
+        if any(
+            job["kind"] == kind and job["status"] in {"queued", "running"} for job in repository.list_jobs(episode_id)
+        ):
             return
         job = runner.enqueue(episode_id, kind)
         background_tasks.add_task(runner.run, job["id"])
@@ -202,7 +206,9 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
     def auto_produce_episode() -> dict[str, Any]:
         try:
             projects = repository.list_projects()
-            project = projects[0] if projects else repository.create_project("Night Shift", "Automated horror production")
+            project = (
+                projects[0] if projects else repository.create_project("Night Shift", "Automated horror production")
+            )
             source = source_provider.discover(repository.source_urls())
             return production.auto_prepare(project["id"], source)
         except (RuntimeError, ValueError) as exc:
@@ -225,10 +231,14 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
         return repository.update_episode(episode_id, **payload.model_dump(exclude_none=True))  # type: ignore[return-value]
 
     @app.post("/api/episodes/{episode_id}/scenes/{scene_number}/image")
-    async def upload_scene_image(episode_id: str, scene_number: int, background_tasks: BackgroundTasks, image: UploadFile = File(...)) -> dict[str, Any]:
+    async def upload_scene_image(
+        episode_id: str, scene_number: int, background_tasks: BackgroundTasks, image: UploadFile = File(...)
+    ) -> dict[str, Any]:
         episode = episode_or_404(episode_id)
         if episode["status"] != EpisodeStatus.ASSETS_APPROVED.value:
-            raise HTTPException(status_code=409, detail="Scene images can be uploaded after the asset review is approved")
+            raise HTTPException(
+                status_code=409, detail="Scene images can be uploaded after the asset review is approved"
+            )
         suffix = Path(image.filename or "").suffix.lower()
         if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
             raise HTTPException(status_code=422, detail="Upload a JPG, PNG, or WebP scene image")
@@ -236,11 +246,17 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
         if not payload or len(payload) > 25 * 1024 * 1024:
             raise HTTPException(status_code=422, detail="Scene image must be between 1 byte and 25 MB")
         with _episode_write_lock(episode_id):
-            scenes = (episode_or_404(episode_id).get("storyboard") or [])
+            scenes = episode_or_404(episode_id).get("storyboard") or []
             scene = next((item for item in scenes if int(item.get("number", -1)) == scene_number), None)
             if scene is None:
                 raise HTTPException(status_code=404, detail="Scene not found")
-            image_path = repository.database_path.parent / "outputs" / episode_id / "images" / f"scene-{scene_number:03d}{suffix}"
+            image_path = (
+                repository.database_path.parent
+                / "outputs"
+                / episode_id
+                / "images"
+                / f"scene-{scene_number:03d}{suffix}"
+            )
             image_path.parent.mkdir(parents=True, exist_ok=True)
             image_path.write_bytes(payload)
             scene["asset_path"] = str(image_path)
@@ -252,7 +268,9 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
         return episode_or_404(episode_id)
 
     @app.post("/api/episodes/{episode_id}/scenes/{scene_number}/video")
-    async def upload_scene_video(episode_id: str, scene_number: int, background_tasks: BackgroundTasks, video: UploadFile = File(...)) -> dict[str, Any]:
+    async def upload_scene_video(
+        episode_id: str, scene_number: int, background_tasks: BackgroundTasks, video: UploadFile = File(...)
+    ) -> dict[str, Any]:
         episode = episode_or_404(episode_id)
         if episode["status"] != EpisodeStatus.ASSETS_READY.value:
             raise HTTPException(status_code=409, detail="Scene videos can be uploaded after all scene images are ready")
@@ -263,7 +281,9 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
         suffix = Path(video.filename or "").suffix.lower()
         if suffix not in {".mp4", ".mov", ".webm"}:
             raise HTTPException(status_code=422, detail="Upload an MP4, MOV, or WebM scene video")
-        destination = repository.database_path.parent / "outputs" / episode_id / "videos" / f"scene-{scene_number:03d}{suffix}"
+        destination = (
+            repository.database_path.parent / "outputs" / episode_id / "videos" / f"scene-{scene_number:03d}{suffix}"
+        )
         await _store_scene_video(video, destination, scene_number)
         with _episode_write_lock(episode_id):
             scenes = episode_or_404(episode_id).get("storyboard") or []
@@ -280,10 +300,14 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
         return episode_or_404(episode_id)
 
     @app.post("/api/episodes/{episode_id}/scene-images")
-    async def upload_scene_images(episode_id: str, background_tasks: BackgroundTasks, images: list[UploadFile] = File(...)) -> dict[str, Any]:
+    async def upload_scene_images(
+        episode_id: str, background_tasks: BackgroundTasks, images: list[UploadFile] = File(...)
+    ) -> dict[str, Any]:
         episode = episode_or_404(episode_id)
         if episode["status"] != EpisodeStatus.ASSETS_APPROVED.value:
-            raise HTTPException(status_code=409, detail="Scene images can be uploaded after the asset review is approved")
+            raise HTTPException(
+                status_code=409, detail="Scene images can be uploaded after the asset review is approved"
+            )
         scenes = episode.get("storyboard") or []
         if not images:
             raise HTTPException(status_code=422, detail="Select one or more scene images")
@@ -292,7 +316,9 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
             suffix = Path(image.filename or "").suffix.lower()
             if suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
                 raise HTTPException(status_code=422, detail="Every file must be a JPG, PNG, or WebP scene image")
-            match = re.search(r"(?:scene|shot|image)[^0-9]*(\d{1,3})", Path(image.filename or "").stem, flags=re.IGNORECASE)
+            match = re.search(
+                r"(?:scene|shot|image)[^0-9]*(\d{1,3})", Path(image.filename or "").stem, flags=re.IGNORECASE
+            )
             if match is None:
                 raise HTTPException(
                     status_code=422,
@@ -301,7 +327,9 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
             numbered.append((int(match.group(1)), image))
         scene_numbers = {int(scene.get("number", -1)) for scene in scenes}
         supplied_numbers = [number for number, _ in numbered]
-        if len(set(supplied_numbers)) != len(supplied_numbers) or any(number not in scene_numbers for number in supplied_numbers):
+        if len(set(supplied_numbers)) != len(supplied_numbers) or any(
+            number not in scene_numbers for number in supplied_numbers
+        ):
             raise HTTPException(status_code=422, detail="Uploaded filenames must contain unique valid scene numbers")
         scene_by_number = {int(scene["number"]): scene for scene in scenes}
         # Read and validate every payload before touching the filesystem so a bad file
@@ -310,13 +338,21 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
         for scene_number, image in numbered:
             payload = await image.read()
             if not payload or len(payload) > 25 * 1024 * 1024:
-                raise HTTPException(status_code=422, detail=f"Scene {scene_number} image must be between 1 byte and 25 MB")
+                raise HTTPException(
+                    status_code=422, detail=f"Scene {scene_number} image must be between 1 byte and 25 MB"
+                )
             payloads.append((scene_number, payload, Path(image.filename or "").suffix.lower()))
         with _episode_write_lock(episode_id):
             scenes = episode_or_404(episode_id).get("storyboard") or []
             scene_by_number = {int(scene["number"]): scene for scene in scenes}
             for scene_number, payload, suffix in payloads:
-                image_path = repository.database_path.parent / "outputs" / episode_id / "images" / f"scene-{scene_number:03d}{suffix}"
+                image_path = (
+                    repository.database_path.parent
+                    / "outputs"
+                    / episode_id
+                    / "images"
+                    / f"scene-{scene_number:03d}{suffix}"
+                )
                 image_path.parent.mkdir(parents=True, exist_ok=True)
                 image_path.write_bytes(payload)
                 scene_by_number[scene_number]["asset_path"] = str(image_path)
@@ -328,7 +364,9 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
         return episode_or_404(episode_id)
 
     @app.post("/api/episodes/{episode_id}/scene-videos")
-    async def upload_scene_videos(episode_id: str, background_tasks: BackgroundTasks, videos: list[UploadFile] = File(...)) -> dict[str, Any]:
+    async def upload_scene_videos(
+        episode_id: str, background_tasks: BackgroundTasks, videos: list[UploadFile] = File(...)
+    ) -> dict[str, Any]:
         episode = episode_or_404(episode_id)
         if episode["status"] != EpisodeStatus.ASSETS_READY.value:
             raise HTTPException(status_code=409, detail="Scene videos can be uploaded after all scene images are ready")
@@ -337,23 +375,44 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
         numbered: list[tuple[int, UploadFile]] = []
         for video in videos:
             suffix = Path(video.filename or "").suffix.lower()
-            match = re.search(r"(?:scene|shot|video)[^0-9]*(\d{1,3})", Path(video.filename or "").stem, flags=re.IGNORECASE)
+            match = re.search(
+                r"(?:scene|shot|video)[^0-9]*(\d{1,3})", Path(video.filename or "").stem, flags=re.IGNORECASE
+            )
             if suffix not in {".mp4", ".mov", ".webm"} or match is None:
-                raise HTTPException(status_code=422, detail="Name each MP4, MOV, or WebM with its scene number, for example scene-001.mp4")
+                raise HTTPException(
+                    status_code=422,
+                    detail="Name each MP4, MOV, or WebM with its scene number, for example scene-001.mp4",
+                )
             numbered.append((int(match.group(1)), video))
         supplied = [number for number, _ in numbered]
         if len(set(supplied)) != len(supplied) or any(number not in scene_by_number for number in supplied):
-            raise HTTPException(status_code=422, detail="Uploaded video filenames must contain unique valid scene numbers")
+            raise HTTPException(
+                status_code=422, detail="Uploaded video filenames must contain unique valid scene numbers"
+            )
         for scene_number, video in numbered:
-            destination = repository.database_path.parent / "outputs" / episode_id / "videos" / f"scene-{scene_number:03d}{Path(video.filename or '').suffix.lower()}"
+            destination = (
+                repository.database_path.parent
+                / "outputs"
+                / episode_id
+                / "videos"
+                / f"scene-{scene_number:03d}{Path(video.filename or '').suffix.lower()}"
+            )
             await _store_scene_video(video, destination, scene_number)
             scene_by_number[scene_number]["video_path"] = str(destination)
             scene_by_number[scene_number]["video_status"] = "uploaded"
         with _episode_write_lock(episode_id):
             scenes = episode_or_404(episode_id).get("storyboard") or []
             for scene_number, video in numbered:
-                destination = repository.database_path.parent / "outputs" / episode_id / "videos" / f"scene-{scene_number:03d}{Path(video.filename or '').suffix.lower()}"
-                next(scene for scene in scenes if int(scene["number"]) == scene_number).update(video_path=str(destination), video_status="uploaded")
+                destination = (
+                    repository.database_path.parent
+                    / "outputs"
+                    / episode_id
+                    / "videos"
+                    / f"scene-{scene_number:03d}{Path(video.filename or '').suffix.lower()}"
+                )
+                next(scene for scene in scenes if int(scene["number"]) == scene_number).update(
+                    video_path=str(destination), video_status="uploaded"
+                )
             repository.update_episode(episode_id, storyboard=scenes)
         repository.add_activity(episode_id, "video", f"Uploaded {len(numbered)} ordered scene video(s)")
         if scenes and all(Path(str(scene.get("video_path") or "")).is_file() for scene in scenes):
@@ -364,14 +423,22 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
     def start_media_revision(episode_id: str) -> dict[str, Any]:
         episode = episode_or_404(episode_id)
         if episode["status"] not in {EpisodeStatus.VIDEO_READY.value, EpisodeStatus.AWAITING_FINAL_REVIEW.value}:
-            raise HTTPException(status_code=409, detail="A media revision is available after an assembled video reaches final review")
-        scenes = apply_director_pacing(episode.get("storyboard") or [], episode["script_final"].strip() or episode["script_draft"].strip())
+            raise HTTPException(
+                status_code=409, detail="A media revision is available after an assembled video reaches final review"
+            )
+        scenes = apply_director_pacing(
+            episode.get("storyboard") or [], episode["script_final"].strip() or episode["script_draft"].strip()
+        )
         for scene in scenes:
             scene.pop("video_path", None)
             scene.pop("video_status", None)
         repository.update_episode(episode_id, storyboard=scenes, output_path="")
-        repository.transition_episode(episode_id, EpisodeStatus.ASSETS_READY, note="Started media revision; upload replacement scene videos")
-        repository.add_activity(episode_id, "video", "Opened a new media revision; previous final artifact was retained on disk")
+        repository.transition_episode(
+            episode_id, EpisodeStatus.ASSETS_READY, note="Started media revision; upload replacement scene videos"
+        )
+        repository.add_activity(
+            episode_id, "video", "Opened a new media revision; previous final artifact was retained on disk"
+        )
         return episode_or_404(episode_id)
 
     @app.get("/api/episodes/{episode_id}/transitions")
@@ -428,13 +495,28 @@ def create_app(database_path: str | Path | None = None, source_provider: Any | N
                 # start a second FFmpeg render racing the first on the same output file.
                 start_job_if_idle(episode_id, kind, background_tasks)
                 job = next(item for item in repository.list_jobs(episode_id) if item["kind"] == kind)
-                return {"job": job, "episode": episode_or_404(episode_id), "events": repository.list_job_events(job["id"])}
-            existing = next((item for item in repository.list_jobs(episode_id) if item["kind"] == kind and item["status"] in {"queued", "running"}), None)
+                return {
+                    "job": job,
+                    "episode": episode_or_404(episode_id),
+                    "events": repository.list_job_events(job["id"]),
+                }
+            existing = next(
+                (
+                    item
+                    for item in repository.list_jobs(episode_id)
+                    if item["kind"] == kind and item["status"] in {"queued", "running"}
+                ),
+                None,
+            )
             job = existing if existing else runner.enqueue(episode_id, kind)
             completed = runner.run(job["id"])
             if completed["status"] == "failed":
                 raise HTTPException(status_code=422, detail=completed["error"])
-            return {"job": completed, "episode": episode_or_404(episode_id), "events": repository.list_job_events(job["id"])}
+            return {
+                "job": completed,
+                "episode": episode_or_404(episode_id),
+                "events": repository.list_job_events(job["id"]),
+            }
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 

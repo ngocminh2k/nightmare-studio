@@ -13,6 +13,7 @@ Tools:
   rate_episode      — blind quality rating (agent doesn't see prior scores)
   regenerate_scenes — re-run assets for specific scene numbers
 """
+
 from __future__ import annotations
 
 import json
@@ -39,6 +40,7 @@ _DB = Path(os.environ.get("NIGHTMARE_STUDIO_DB", Path(__file__).parents[1] / "da
 
 def _deps() -> tuple[StudioRepository, EpisodeProductionService]:
     from .jobs import JobRunner
+
     repo = StudioRepository(_DB)
     runner = JobRunner(
         repo,
@@ -50,6 +52,7 @@ def _deps() -> tuple[StudioRepository, EpisodeProductionService]:
 
 
 # ── MCP manifest ────────────────────────────────────────────────────────────
+
 
 @app.get("/")
 async def manifest():
@@ -120,7 +123,11 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "episode_id": {"type": "string", "description": "Episode ID"},
-                "scene_numbers": {"type": "array", "items": {"type": "integer"}, "description": "Scene numbers to regenerate"},
+                "scene_numbers": {
+                    "type": "array",
+                    "items": {"type": "integer"},
+                    "description": "Scene numbers to regenerate",
+                },
                 "reason": {"type": "string", "description": "Why these scenes failed (used to patch prompts)"},
             },
             "required": ["episode_id", "scene_numbers"],
@@ -135,6 +142,7 @@ async def list_tools():
 
 
 # ── Tool dispatch ────────────────────────────────────────────────────────────
+
 
 @app.post("/tools/call")
 async def call_tool(request: Request):
@@ -164,8 +172,10 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
 
     if name == "produce_episode":
         return await loop.run_in_executor(
-            None, _produce_episode,
-            args.get("episode_id"), args.get("approve_all", True),
+            None,
+            _produce_episode,
+            args.get("episode_id"),
+            args.get("approve_all", True),
         )
 
     if name == "episode_status":
@@ -176,14 +186,18 @@ async def _dispatch(name: str, args: dict[str, Any]) -> Any:
 
     if name == "regenerate_scenes":
         return await loop.run_in_executor(
-            None, _regenerate_scenes,
-            args["episode_id"], args["scene_numbers"], args.get("reason", ""),
+            None,
+            _regenerate_scenes,
+            args["episode_id"],
+            args["scene_numbers"],
+            args.get("reason", ""),
         )
 
     raise ValueError(f"Unknown tool: {name}")
 
 
 # ── Tool implementations ─────────────────────────────────────────────────────
+
 
 def _find_story() -> dict:
     from .firecrawl_discovery import FirecrawlSourceProvider
@@ -215,13 +229,15 @@ def _queue_story(url: str, title: str) -> dict:
         title = url.split("/")[-2].replace("_", " ").title() or "Queued Story"
     try:
         from .firecrawl_discovery import FirecrawlSourceProvider, _scrape_post
+
         if FirecrawlSourceProvider.available():
             md = _scrape_post(url)
-            text = "\n".join(l for l in md.splitlines() if len(l) > 20)[:5000]
+            text = "\n".join(ln for ln in md.splitlines() if len(ln) > 20)[:5000]
         else:
             req = Request(url, headers={"User-Agent": "NightmareStudio/1.0"})
             with urlopen(req, timeout=30) as r:
                 from .discovery import RedditSourceProvider
+
                 text = RedditSourceProvider._extract_story_text(r.read().decode())
     except Exception as e:
         return {"error": f"Could not scrape story: {e}", "url": url}
@@ -233,7 +249,7 @@ def _queue_story(url: str, title: str) -> dict:
 
 def _produce_episode(episode_id: str | None, approve_all: bool) -> dict:
     from .firecrawl_discovery import FirecrawlSourceProvider
-    from .discovery import RedditSourceProvider, SourceStory
+    from .discovery import RedditSourceProvider
 
     repo, service = _deps()
     if episode_id:
@@ -252,37 +268,41 @@ def _produce_episode(episode_id: str | None, approve_all: bool) -> dict:
 def _episode_status(limit: int) -> dict:
     repo, _ = _deps()
     import sqlite3
+
     conn = sqlite3.connect(_DB)
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
-        "SELECT id, title, status, output_path, created_at FROM episodes ORDER BY created_at DESC LIMIT ?",
-        (limit,)
+        "SELECT id, title, status, output_path, created_at FROM episodes ORDER BY created_at DESC LIMIT ?", (limit,)
     ).fetchall()
     # Fetch quality scores from reviews
     episodes = []
     for r in rows:
         reviews = conn.execute(
-            "SELECT gate, decision, note FROM reviews WHERE episode_id=? ORDER BY created_at DESC",
-            (r["id"],)
+            "SELECT gate, decision, note FROM reviews WHERE episode_id=? ORDER BY created_at DESC", (r["id"],)
         ).fetchall()
         score = next((rev["note"] for rev in reviews if "score" in (rev["note"] or "").lower()), None)
-        episodes.append({
-            "id": r["id"], "title": r["title"], "status": r["status"],
-            "output_path": r["output_path"], "created_at": r["created_at"],
-            "quality_score": score,
-        })
+        episodes.append(
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "status": r["status"],
+                "output_path": r["output_path"],
+                "created_at": r["created_at"],
+                "quality_score": score,
+            }
+        )
     conn.close()
     return {"episodes": episodes, "total": len(episodes)}
 
 
 def _rate_episode(episode_id: str) -> dict:
     """Blind heuristic quality rating — scores storyboard + asset completeness without prior context."""
-    import sqlite3, json as _json
+    import sqlite3
+    import json as _json
+
     conn = sqlite3.connect(_DB)
     conn.row_factory = sqlite3.Row
-    ep = conn.execute(
-        "SELECT title, storyboard_json, output_path FROM episodes WHERE id=?", (episode_id,)
-    ).fetchone()
+    ep = conn.execute("SELECT title, storyboard_json, output_path FROM episodes WHERE id=?", (episode_id,)).fetchone()
     conn.close()
     if not ep:
         return {"error": "Episode not found"}
@@ -308,6 +328,7 @@ def _rate_episode(episode_id: str) -> dict:
 
     # prompt_quality: validate prompts with validation module
     from .validation import validate_image_prompt
+
     prompt_errors: list[int] = []
     for s in scenes:
         p = s.get("image_prompt", "") or s.get("visual_description", "")
@@ -318,8 +339,8 @@ def _rate_episode(episode_id: str) -> dict:
     # pacing: variance in narration lengths (high variance = good pacing)
     if n > 1:
         mean = avg_narr
-        variance = sum((l - mean) ** 2 for l in narr_lens) / n
-        pacing = _clamp(5.0 + min(variance ** 0.5 / 100, 1) * 4)
+        variance = sum((length - mean) ** 2 for length in narr_lens) / n
+        pacing = _clamp(5.0 + min(variance**0.5 / 100, 1) * 4)
     else:
         pacing = 5.0
 
@@ -335,7 +356,10 @@ def _rate_episode(episode_id: str) -> dict:
 
     # youtube_retention: heuristic from scene count, narration density, and ending strength
     last_narr = scenes[-1].get("narration", "") if scenes else ""
-    has_hook = any(k in (scenes[0].get("narration", "") if scenes else "").lower() for k in ("never", "wrong", "dark", "scream", "alone"))
+    has_hook = any(
+        k in (scenes[0].get("narration", "") if scenes else "").lower()
+        for k in ("never", "wrong", "dark", "scream", "alone")
+    )
     has_ending = any(k in last_narr.lower() for k in ("never", "door", "gone", "voice", "realized"))
     youtube_retention = _clamp(5.0 + (1 if has_hook else 0) * 2 + (1 if has_ending else 0) * 1.5 + min(n / 10, 1) * 1.5)
 
@@ -366,7 +390,9 @@ def _rate_episode(episode_id: str) -> dict:
 
 def _regenerate_scenes(episode_id: str, scene_numbers: list[int], reason: str) -> dict:
     """Mark specific scenes for regeneration and re-run assets job for them."""
-    import sqlite3, json as _json
+    import sqlite3
+    import json as _json
+
     conn = sqlite3.connect(_DB)
     conn.row_factory = sqlite3.Row
     ep = conn.execute("SELECT storyboard_json FROM episodes WHERE id=?", (episode_id,)).fetchone()
@@ -396,6 +422,7 @@ def _regenerate_scenes(episode_id: str, scene_numbers: list[int], reason: str) -
     repo, _ = _deps()
     job_id = repo.create_job(episode_id, "assets")
     from .jobs import JobRunner
+
     runner = JobRunner(
         repo,
         llm_provider=configured_llm_provider(ProviderSettings.from_environment()),
@@ -408,4 +435,5 @@ def _regenerate_scenes(episode_id: str, scene_numbers: list[int], reason: str) -
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="127.0.0.1", port=8200)

@@ -84,7 +84,9 @@ class EpisodeProductionService:
         scenes = episode["storyboard"]
         if not scenes:
             raise ValueError("Episode has no storyboard for a package rebuild")
-        self.repository.add_activity(episode_id, "workflow", f"Re-exported {len(scenes)} scene package before final review")
+        self.repository.add_activity(
+            episode_id, "workflow", f"Re-exported {len(scenes)} scene package before final review"
+        )
         self._export_package(episode_id)
         return self._episode(episode_id)
 
@@ -101,9 +103,7 @@ class EpisodeProductionService:
         score = result["avg"]
         passed = result["pass"]
 
-        dims = "; ".join(
-            f"{d}={s:.1f}" for d, s in result["scores"].items()
-        )
+        dims = "; ".join(f"{d}={s:.1f}" for d, s in result["scores"].items())
         note = f"Quality gate {'PASS' if passed else 'FAIL'} {score:.1f}/10 — {dims}"
         self.repository.add_activity(episode_id, "quality_gate", note)
         self.repository.transition_episode(
@@ -128,7 +128,9 @@ class EpisodeProductionService:
             self.repository.update_episode(episode_id, output_path=str(output_dir))
         episode = self._episode(episode_id)
         manifest = self.repository.episode_manifest(episode_id)
-        (output_dir / "episode_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        (output_dir / "episode_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         write_image_prompt_csv(output_dir / "image_prompts.csv", episode["storyboard"])
         self._write_storyboard_html(output_dir / "storyboard.html", episode)
 

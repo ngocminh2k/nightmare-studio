@@ -11,7 +11,6 @@ from urllib.error import HTTPError
 import pytest
 
 from app.audio import (
-    AudioProvider,
     AudioSettings,
     MockAudioProvider,
     VoiceStudioAudioProvider,
@@ -59,8 +58,9 @@ def test_voice_studio_provider_generates_speech(tmp_path):
 
     output_file = tmp_path / "test_output.mp3"
 
-    with patch("app.audio.urlopen", return_value=mock_response) as mock_urlopen, patch.object(
-        VoiceStudioAudioProvider, "_resolve_voice_id", return_value="ab36bbf3"
+    with (
+        patch("app.audio.urlopen", return_value=mock_response) as mock_urlopen,
+        patch.object(VoiceStudioAudioProvider, "_resolve_voice_id", return_value="ab36bbf3"),
     ):
         result = provider.generate_speech("Hello, this is Mr. Kane.", output_file, voice="mrkane")
         assert result == output_file
@@ -82,7 +82,10 @@ def test_voice_studio_provider_handles_http_error(tmp_path):
     provider = VoiceStudioAudioProvider(settings)
     output_file = tmp_path / "error.mp3"
 
-    with patch("app.audio.urlopen", side_effect=HTTPError("http://127.0.0.1:3900", 500, "Server Error", {}, io.BytesIO(b"error detail"))):
+    with patch(
+        "app.audio.urlopen",
+        side_effect=HTTPError("http://127.0.0.1:3900", 500, "Server Error", {}, io.BytesIO(b"error detail")),
+    ):
         with pytest.raises(RuntimeError, match="VoiceStudio speech generation failed: HTTP 500"):
             provider.generate_speech("Test", output_file)
 

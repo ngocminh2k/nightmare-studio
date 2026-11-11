@@ -76,21 +76,31 @@ def test_every_review_gate_can_send_work_back_to_an_editable_status(tmp_path):
     ]
     for gate, path, editable in [
         ("script", script_path, EpisodeStatus.REWRITTEN),
-        ("assets", script_path + [
-            EpisodeStatus.SCRIPT_APPROVED,
+        (
+            "assets",
+            script_path
+            + [
+                EpisodeStatus.SCRIPT_APPROVED,
+                EpisodeStatus.STORYBOARDED,
+                EpisodeStatus.AWAITING_ASSET_REVIEW,
+            ],
             EpisodeStatus.STORYBOARDED,
-            EpisodeStatus.AWAITING_ASSET_REVIEW,
-        ], EpisodeStatus.STORYBOARDED),
-        ("final", script_path + [
-            EpisodeStatus.SCRIPT_APPROVED,
-            EpisodeStatus.STORYBOARDED,
-            EpisodeStatus.AWAITING_ASSET_REVIEW,
-            EpisodeStatus.ASSETS_APPROVED,
+        ),
+        (
+            "final",
+            script_path
+            + [
+                EpisodeStatus.SCRIPT_APPROVED,
+                EpisodeStatus.STORYBOARDED,
+                EpisodeStatus.AWAITING_ASSET_REVIEW,
+                EpisodeStatus.ASSETS_APPROVED,
+                EpisodeStatus.ASSETS_READY,
+                EpisodeStatus.AUDIO_READY,
+                EpisodeStatus.VIDEO_READY,
+                EpisodeStatus.AWAITING_FINAL_REVIEW,
+            ],
             EpisodeStatus.ASSETS_READY,
-            EpisodeStatus.AUDIO_READY,
-            EpisodeStatus.VIDEO_READY,
-            EpisodeStatus.AWAITING_FINAL_REVIEW,
-        ], EpisodeStatus.ASSETS_READY),
+        ),
     ]:
         episode = repo.create_episode(project["id"], f"Gate {gate}", "", "")
         for status in path:

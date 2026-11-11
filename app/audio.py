@@ -96,11 +96,13 @@ class VoiceStudioAudioProvider:
             return self._voice_id_cache[voice]
         # Already looks like an ID (short hex) — use as-is
         import re as _re
+
         if _re.fullmatch(r"[0-9a-f]{8}", voice):
             return voice
         try:
             from urllib.request import urlopen as _open
             import json as _json
+
             with _open(f"{self.settings.voice_studio_url}/profiles", timeout=5) as r:
                 profiles = _json.loads(r.read())
             for p in profiles:
@@ -156,9 +158,7 @@ class VoiceStudioAudioProvider:
                 f"VoiceStudio speech generation failed: HTTP {exc.code} {exc.reason}. Detail: {error_body}"
             ) from exc
         except (URLError, TimeoutError) as exc:
-            raise RuntimeError(
-                f"Cannot reach VoiceStudio at {self.settings.voice_studio_url}: {exc}"
-            ) from exc
+            raise RuntimeError(f"Cannot reach VoiceStudio at {self.settings.voice_studio_url}: {exc}") from exc
 
         if not audio_bytes:
             raise RuntimeError("VoiceStudio returned empty audio payload")
@@ -227,7 +227,19 @@ class VoiceStudioAudioProvider:
                         encoding="utf-8",
                     )
                     res = subprocess.run(
-                        [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_list), "-c", "copy", str(output_path)],
+                        [
+                            ffmpeg,
+                            "-y",
+                            "-f",
+                            "concat",
+                            "-safe",
+                            "0",
+                            "-i",
+                            str(concat_list),
+                            "-c",
+                            "copy",
+                            str(output_path),
+                        ],
                         capture_output=True,
                         cwd=temp_dir,
                         timeout=60,
@@ -247,6 +259,7 @@ class VoiceStudioAudioProvider:
             # narration. The deterministic provider stays reachable on purpose
             # via NIGHTMARE_AUDIO_MODE, not via a silent catch-all.
             import logging
+
             logging.getLogger("nightmare_studio.audio").error(
                 "VoiceStudio synthesis failed (%s); episode audio cannot be generated", exc
             )
@@ -279,11 +292,16 @@ class DeterministicAudioProvider:
         if ffmpeg:
             dur = max(2.5, round(len(text.split()) / 2.5, 2))
             cmd = [
-                ffmpeg, "-y",
-                "-f", "lavfi",
-                "-i", "anoisesrc=c=pink:r=48000:a=0.005",
-                "-t", str(dur),
-                "-c:a", "libmp3lame",
+                ffmpeg,
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "anoisesrc=c=pink:r=48000:a=0.005",
+                "-t",
+                str(dur),
+                "-c:a",
+                "libmp3lame",
                 str(output_path),
             ]
             res = subprocess.run(cmd, capture_output=True)

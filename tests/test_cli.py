@@ -17,7 +17,9 @@ class _StubService:
         self.runner = runner
 
     def produce(self, project_id, source, approve_all=False):
-        type(self).calls.append(("produce", {"project_id": project_id, "source": source.title, "approve_all": approve_all}))
+        type(self).calls.append(
+            ("produce", {"project_id": project_id, "source": source.title, "approve_all": approve_all})
+        )
         return {"id": "ep-1", "title": source.title, "status": "awaiting_script_review", "output_path": ""}
 
     def resume(self, episode_id, approve_all=False):
@@ -54,7 +56,9 @@ def test_cli_discovery_run_creates_the_project_and_produces_the_story(cli_env, c
 
     payload = json.loads(capsys.readouterr().out)
     assert payload["status"] == "awaiting_script_review"
-    assert _StubService.calls == [("produce", {"project_id": _project_id(tmp_path), "source": "Discovered incident", "approve_all": True})]
+    assert _StubService.calls == [
+        ("produce", {"project_id": _project_id(tmp_path), "source": "Discovered incident", "approve_all": True})
+    ]
 
 
 def test_cli_reuses_an_existing_project_by_name(cli_env, tmp_path, monkeypatch, capsys):

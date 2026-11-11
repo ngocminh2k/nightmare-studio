@@ -1,4 +1,4 @@
-﻿"""Tests for SystemOne integration and dynamic scene pacing."""
+"""Tests for SystemOne integration and dynamic scene pacing."""
 
 from __future__ import annotations
 
@@ -222,8 +222,8 @@ class TestApplyDirectorPacingIntegration:
     def test_apply_director_pacing_with_deterministic_systemone_client(self) -> None:
         scenes = [
             {"number": 1, "narration": "A branch snapped as something lunged from the shadows."},  # Action -> 4.0s
-            {"number": 2, "narration": "The porcelain doll stared into the silence."},           # Dread -> 8.0s
-            {"number": 3, "narration": "Victor Kane continued down the dimly lit alley."},       # Mid -> 6.0s
+            {"number": 2, "narration": "The porcelain doll stared into the silence."},  # Dread -> 8.0s
+            {"number": 3, "narration": "Victor Kane continued down the dimly lit alley."},  # Mid -> 6.0s
         ]
         script = " ".join(scene["narration"] for scene in scenes)
         client = DeterministicSystemOneClient()
@@ -247,9 +247,9 @@ class TestApplyDirectorPacingIntegration:
 
     def test_apply_director_pacing_preserves_and_clamps_directed_target(self) -> None:
         scenes = [
-            {"number": 1, "narration": "Action scene", "target_duration_seconds": 2.5},   # Clamped up to 4.0
-            {"number": 2, "narration": "Valid target", "target_duration_seconds": 5.5},   # Preserved at 5.5
-            {"number": 3, "narration": "Long scene", "target_duration_seconds": 12.0},    # Clamped down to 8.0
+            {"number": 1, "narration": "Action scene", "target_duration_seconds": 2.5},  # Clamped up to 4.0
+            {"number": 2, "narration": "Valid target", "target_duration_seconds": 5.5},  # Preserved at 5.5
+            {"number": 3, "narration": "Long scene", "target_duration_seconds": 12.0},  # Clamped down to 8.0
         ]
         script = "Action scene. Valid target. Long scene."
         client = DeterministicSystemOneClient()
@@ -304,11 +304,14 @@ class TestApplyDirectorPacingIntegration:
         def invalid_opener(request: Any, timeout: int = 30) -> MockResponse:
             class NonDictResponse:
                 def read(self) -> bytes:
-                    return b"\"plain string\""
+                    return b'"plain string"'
+
                 def __enter__(self) -> Self:
                     return self
+
                 def __exit__(self, *args: object) -> None:
                     pass
+
             return NonDictResponse()  # type: ignore
 
         client_failing = RouterSystemOneClient(opener=invalid_opener, fallback_to_deterministic=False)
