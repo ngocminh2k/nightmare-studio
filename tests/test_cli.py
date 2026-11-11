@@ -47,6 +47,9 @@ def cli_env(tmp_path, monkeypatch):
     monkeypatch.setenv("NIGHTMARE_LLM_MODE", "mock")
     monkeypatch.setattr(cli, "EpisodeProductionService", _StubService)
     monkeypatch.setattr(cli, "RedditSourceProvider", _StubDiscovery)
+    # A story scraped into data/ on a developer machine would otherwise win over
+    # the stubbed provider and make this test depend on local repo state.
+    monkeypatch.setattr(cli, "LOCAL_STORY_FILE", tmp_path / "no-scraped-story.json")
 
 
 def test_cli_discovery_run_creates_the_project_and_produces_the_story(cli_env, capsys, tmp_path, monkeypatch):
