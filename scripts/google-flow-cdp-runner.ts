@@ -134,12 +134,15 @@ export type FlowRunOptions = {
 export const VALID_MODES = new Set<FlowMode>(['image', 'video']);
 export const IMAGE_RATIOS = new Set(['16:9', '4:3', '1:1', '3:4', '9:16']);
 export const VIDEO_RATIOS = new Set(['16:9', '9:16']);
+// Omni Flash 1.2 renders up to 15s; this project never asks for more than 10s,
+// so 15 stays out of the set even once the UI offers it.
 export const VIDEO_DURATIONS = new Set([4, 6, 8, 10]);
 export const VIDEO_RESOLUTIONS = new Set(['360p', '720p', '1080p']);
 export const IMAGE_MODELS = new Set(['Nano Banana 2', 'Nano Banana Pro', 'Imagen 4']);
 export const VIDEO_MODELS = new Set([
   'Omni 1.1 Flash',
   'Omni Flash',
+  'Omni Flash 1.2',
   'Veo 3.1 - Lite',
   'Veo 3.1 - Fast',
   'Veo 3.1 - Quality',
@@ -154,7 +157,17 @@ export const MODEL_ALIASES = new Map<string, string>([
   ['omniflash', 'Omni 1.1 Flash'],
   ['omniflash 1.1', 'Omni 1.1 Flash'],
   ['Omni 1.1', 'Omni 1.1 Flash'],
+  ['omniflash 1.2', 'Omni Flash 1.2'],
+  ['Omni 1.2', 'Omni Flash 1.2'],
 ]);
+
+// The Flow UI has shipped the same model under two spellings, so try both.
+export const MODEL_UI_LABELS: Record<string, string[]> = {
+  'omni flash 1.2': ['Omni Flash 1.2', 'Omni 1.2 Flash'],
+};
+
+export const modelUiLabels = (model: string): string[] =>
+  MODEL_UI_LABELS[normalizeUiText(model)] ?? [model];
 
 export const FLOW_PROMPT_WAIT_MS = 15_000;
 export const FLOW_UI_ACTION_DELAY_MS = 250;
@@ -979,19 +992,24 @@ const configureFlowControls = async (page: any, job: FlowJob) => {
     await selectFlowTab(page, job.videoInputMode === 'ingredients' ? ['Thành phần', 'Ingredients'] : ['Khung hình', 'Frames'], 'video input mode');
   }
   await selectFlowTab(page, [job.aspectRatio], 'aspect ratio');
+  const modelLabels = modelUiLabels(job.model);
   const modelPicker = await findModelControl(page);
   const currentModel = normalizeUiText(await modelPicker.innerText().catch(() => ''));
-  if (!currentModel.includes(normalizeUiText(job.model))) {
+  if (!modelLabels.some((label) => currentModel.includes(normalizeUiText(label)))) {
     await modelPicker.click({ force: true });
     await settleFlowUi();
-    const model =
-      (await waitForVisibleButtonByEnding(page, [job.model])) ||
-      (await findFirst(page, [
-        `[role="menuitem"]:has-text("${job.model}")`,
-        `[role="option"]:has-text("${job.model}")`,
-        `.mat-mdc-menu-content button:has-text("${job.model}")`,
-        `button:has-text("${job.model}")`,
-      ]));
+    let model: any = null;
+    for (const label of modelLabels) {
+      model =
+        (await waitForVisibleButtonByEnding(page, [label])) ||
+        (await findFirst(page, [
+          `[role="menuitem"]:has-text("${label}")`,
+          `[role="option"]:has-text("${label}")`,
+          `.mat-mdc-menu-content button:has-text("${label}")`,
+          `button:has-text("${label}")`,
+        ]));
+      if (model) break;
+    }
     if (!model) throw new Error(`Flow model "${job.model}" was not found in this account.`);
     await model.click({ force: true });
     await settleFlowUi();
@@ -1028,12 +1046,15 @@ const configureFlowControls = async (page: any, job: FlowJob) => {
 //     composer and hides the model / aspect-ratio settings trigger.
 // Both states make `openFlowSettings` throw "Flow settings summary was not found".
 const ensureMediaComposerReady = async (page: any) => {
+  // If the composer isn't visible yet, close any overlaying session panel first.
   if (!(await page.locator('flow-prompt-box').count())) {
     const closePanel = page.locator('button[aria-label="close" i], button[aria-label*="Đóng" i]').first();
     if (await closePanel.count()) {
       await closePanel.click({ force: true }).catch(() => {});
       await settleFlowUi();
     }
+    // Give the composer a moment to appear after closing the panel.
+    await waitForFirst(page, ['flow-prompt-box'], 8_000);
   }
   const agentChip = page.locator('flow-prompt-box .agent-mode-chip-checked').first();
   if (await agentChip.count()) {
@@ -1694,6 +1715,8 @@ export const runGoogleFlowJob = createExclusiveQueue(async (options: FlowRunOpti
       await page.goto(flowUrl, { waitUntil: 'domcontentloaded', timeout: 45_000 });
       await wait(1_000);
     }
+    // Wait for the Angular composer to hydrate before touching the DOM
+    await waitForFirst(page, ['flow-prompt-box', '.settings-trigger-button', '[contenteditable="true"]'], FLOW_PROMPT_WAIT_MS);
 
     // 3. Reset composer
     log('clearing composer state...');
@@ -1994,7 +2017,7 @@ Options:
   --aspectRatio <ratio>   Aspect ratio (16:9, 4:3, 1:1, 3:4, 9:16) (default: 16:9)
   --model <modelName>     Model name (default: Nano Banana 2 for image, Omni 1.1 Flash for video)
   --variants <1-4>        Number of variants (default: 1)
-  --duration <4|6|8|10>   Video duration in seconds (video mode only, default: 6)
+  --duration <4|6|8|10>   Video duration in seconds (video mode only, default: 6, never above 10)
   --resolution <360p|720p> Video resolution (video mode only, default: 360p)
   --videoInputMode <mode> 'frames' or 'ingredients' (video mode only)
   --media <path...>       One or more paths to local image/video files to attach

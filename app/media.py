@@ -30,6 +30,20 @@ from app.validation import (
     validate_reference_image,
 )
 
+# Durations Flow accepts for a clip. Omni Flash 1.2 can render up to 15s, but
+# this project never asks for more than 10s: the narration is written per
+# scene at ~6-10s, and a rejected take costs the same credit as a good one.
+FLOW_VIDEO_DURATIONS = (4, 6, 8, 10)
+MAX_VIDEO_DURATION_S = 10
+
+
+def clamp_video_duration(duration_s: int | None, default: int = 8) -> int:
+    """Snap a requested clip length onto a duration Flow accepts, capped at 10s."""
+    value = int(duration_s or default)
+    if value not in FLOW_VIDEO_DURATIONS:
+        value = min(FLOW_VIDEO_DURATIONS, key=lambda allowed: abs(allowed - value))
+    return min(value, MAX_VIDEO_DURATION_S)
+
 
 class MediaProvider(Protocol):
     """Creates media artifacts for one storyboard scene at a time."""
@@ -718,7 +732,7 @@ class GoogleFlowCDPMediaProvider(CanvasCDPMediaProvider):
                     "--resolution",
                     self.settings.flow_video_resolution,
                     "--duration",
-                    str(self.settings.flow_video_duration),
+                    str(clamp_video_duration(self.settings.flow_video_duration, default=6)),
                     "--videoInputMode",
                     self.settings.flow_video_input_mode,
                 ]
@@ -1771,9 +1785,7 @@ class GoogleFlowKitMediaProvider:
             # Step 2: submit image-to-video generation
             # omni_flash: reliable, free first-frame i2v, Veo r2v/chaining broken on new API
             sanitized = sanitize_veo_prompt(motion_prompt)
-            final_duration = duration_s or self.default_duration
-            if final_duration not in {4, 6, 8, 10}:
-                final_duration = min([4, 6, 8, 10], key=lambda x: abs(x - final_duration))
+            final_duration = clamp_video_duration(duration_s, self.default_duration)
 
             vid_result = self._post(
                 "/api/flow/generate-video",

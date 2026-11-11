@@ -230,7 +230,7 @@ function runCdpSubprocess(job, projectUrl, cdpUrl) {
       '--aspectRatio', ASPECT_RATIO,
       '--videoInputMode', VIDEO_INPUT_MODE,
       '--output', job.clipPath,
-      '--cdp', CDP_URL,
+      '--cdp', cdpUrl,
       '--projectUrl', projectUrl,
     ];
 
@@ -245,7 +245,7 @@ function runCdpSubprocess(job, projectUrl, cdpUrl) {
     const child = spawn(SPAWN_CMD[0], cmdArgs, {
       cwd: PROJECT_ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, NIGHTMARE_CANVAS_CDP_URL: CDP_URL },
+      env: { ...process.env, NIGHTMARE_CANVAS_CDP_URL: cdpUrl },
       timeout: 8 * 60_000,
     });
 
@@ -266,7 +266,8 @@ function runCdpSubprocess(job, projectUrl, cdpUrl) {
   });
 }
 
-async function workerLoop(workerId, projectUrl, queue, scenes) {
+async function workerLoop(workerId, worker, queue, scenes) {
+  const { cdp, project: projectUrl } = worker;
   const tag = `[W${workerId}]`;
   let completed = 0;
   let failed = 0;
@@ -285,7 +286,7 @@ async function workerLoop(workerId, projectUrl, queue, scenes) {
     const t0 = Date.now();
 
     try {
-      await runCdpSubprocess(job, projectUrl);
+      await runCdpSubprocess(job, projectUrl, cdp);
       const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
       const size = statSync(job.clipPath).size;
       console.log(`${tag} ✅ ${sceneTag} done (${elapsed}s, ${(size / 1024).toFixed(0)}KB)`);
@@ -368,7 +369,7 @@ async function main() {
   const t0 = Date.now();
   const results = await Promise.allSettled(
     Array.from({ length: workerCount }, (_, i) =>
-      workerLoop(i, FLOW_PROJECT_URLS[i], queue, scenes)
+      workerLoop(i, WORKERS[i] || { cdp: CDP_URL, project: FLOW_PROJECT_URLS[i] }, queue, scenes)
     )
   );
 

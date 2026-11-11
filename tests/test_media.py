@@ -21,11 +21,13 @@ from app.media import (  # noqa: E402
     GoogleFlowKitMediaProvider,
     GoogleVeoMediaProvider,
     KiraAIMediaProvider,
+    MAX_VIDEO_DURATION_S,
     MediaNotConfiguredProvider,
     _discover_chrome_path,
     _discover_chrome_user_data_dir,
     _is_cdp_listening,
     build_motion_prompt,
+    clamp_video_duration,
     configured_media_provider,
     parse_motion_prompt_plan,
     public_media_status,
@@ -33,6 +35,37 @@ from app.media import (  # noqa: E402
     veo_video_prompt_messages,
     veo_video_prompt_plan_messages,
 )
+
+
+def test_video_duration_never_exceeds_ten_seconds():
+    # Omni Flash 1.2 renders up to 15s; the pipeline still caps every clip at 10s.
+    assert MAX_VIDEO_DURATION_S == 10
+    assert clamp_video_duration(15) == 10
+    assert clamp_video_duration(12) == 10
+    assert clamp_video_duration(6) == 6
+    assert clamp_video_duration(None, 8) == 8
+    assert clamp_video_duration(7) in (6, 8)
+    assert clamp_video_duration(0, 6) == 6
+
+
+def test_flow_runner_command_caps_a_longer_duration_request(tmp_path):
+    settings = CanvasCDPSettings(
+        media_mode="google_flow_cdp",
+        image_url="https://flow.google.com/project/test-project",
+        video_url="https://flow.google.com/project/test-project",
+        flow_runner_backend="ts",
+        flow_runner_path=str(tmp_path / "runner.ts"),
+        flow_video_duration=15,
+    )
+
+    cmd = GoogleFlowCDPMediaProvider(settings)._build_runner_command(
+        media_kind="video",
+        prompt="slow push in",
+        output_path=tmp_path / "clip.mp4",
+        url="https://flow.google.com/project/test-project",
+    )
+
+    assert cmd[cmd.index("--duration") + 1] == "10"
 
 
 def test_motion_prompt_preserves_scene_composition_and_uses_controlled_camera_motion():

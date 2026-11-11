@@ -80,6 +80,18 @@ Mọi script nhận `--episode-id <uuid>` (hoặc env `NIGHTMARE_EPISODE_ID`). *
    `language=en` / `speed=0.88` + warm DSP chain trong `scripts/regenerate-mrkane-warm-voiceover.py`.
 5. **Không chạy song song 2 account** — 1 flowkit, đổi account tuần tự qua `switch-account.ps1`.
 6. Quality gate heuristic (blind, không LLM) trong `app/quality_gate.py`, ngưỡng pass **8.0/10**.
+7. **Mỗi clip video tối đa 10s.** Omni Flash 1.2 render được tới 15s nhưng dự án cố ý chỉ xin
+   tối đa 10s (`clamp_video_duration` trong `app/media.py`, `VIDEO_DURATIONS` trong
+   `scripts/google-flow-cdp-runner.ts`). Không nâng lên 15s khi UI có sẵn lựa chọn đó.
+
+### Chọn model video
+- **CDP runner** (`scripts/google-flow-cdp-runner.ts`): `--model "Omni Flash 1.2"` chỉ chạy được
+  khi account đã có model trong UI (UI có thể hiện "Omni Flash 1.2" hoặc "Omni 1.2 Flash" —
+  runner thử cả hai). Mặc định vẫn là `Omni 1.1 Flash`.
+- **FlowKit** (`NIGHTMARE_FLOWKIT_MODEL_VIDEO`): giá trị được truyền thẳng làm `model_family`.
+  FlowKit hiện chỉ có `omni_flash` (key `abra_i2v_{4,6,8,10}s`) và `veo`; **chưa có** family 1.2.
+  Muốn dùng 1.2 qua flowkit thì phải thêm key vào `agent/models.json` của flowkit
+  (`PATCH /api/models` hot-reload được).
 
 ---
 
