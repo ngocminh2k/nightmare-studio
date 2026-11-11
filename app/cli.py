@@ -16,6 +16,10 @@ from .production import EpisodeProductionService
 from .providers import ProviderSettings, configured_llm_provider
 from .repository import StudioRepository
 
+# A story scraped once into the local data folder is used before any network
+# discovery. Module level so tests can point it away from the developer's file.
+LOCAL_STORY_FILE = Path(__file__).resolve().parents[1] / "data" / "scraped_reddit_story.json"
+
 
 def _make_repository() -> StudioRepository:
     database_path = Path(os.environ.get("NIGHTMARE_STUDIO_DB", Path(__file__).parents[1] / "data" / "studio.db"))
@@ -44,7 +48,7 @@ def _resolve_project(repository: StudioRepository, project_id: str | None, proje
 def _discover_source(repository: StudioRepository):
     """Return a SourceStory using local queued story, Firecrawl, or Reddit."""
     existing = repository.source_urls()
-    local_story_file = Path(__file__).resolve().parents[1] / "data" / "scraped_reddit_story.json"
+    local_story_file = LOCAL_STORY_FILE
     if local_story_file.is_file():
         try:
             data = json.loads(local_story_file.read_text(encoding="utf-8"))
