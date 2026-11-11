@@ -41,3 +41,8 @@ data/canvas-cdp-profile/
 # Debug artifacts at repo root (screenshots, TTS test clips)
 /*.png
 /*.mp3
+
+# Throwaway probes written at the repo root while debugging Flow/Google APIs.
+/*.mjs
+/cov_*.txt
+/.nofix.txt
