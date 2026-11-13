@@ -1,4 +1,4 @@
-# SystemOne Integration & Dynamic Scene Pacing — TDD Evidence
+﻿# SystemOne Integration & Dynamic Scene Pacing — TDD Evidence
 
 Source: SystemOne integration for dynamic scene pacing (4s-8s) via 9Router and deterministic fallback.
 

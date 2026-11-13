@@ -1,6 +1,8 @@
+import json
 from pathlib import Path
 
 from app.jobs import JobRunner, build_storyboard_scenes
+from app.nanobanana_prompt_rules import NANOBANANA_NEGATIVE_PROMPT
 from app.repository import StudioRepository
 
 
@@ -27,22 +29,36 @@ class _CountingLLMProvider:
         return self.response
 
 
-def test_storyboard_scenes_over_cap_skip_the_llm_and_use_the_deterministic_plan():
+def test_storyboard_scenes_are_described_in_batches():
+    provider = _CountingLLMProvider(
+        "| Scene | Scene Visual Description |\n|---|---|\n| 1 | A corridor of dread. |",
+    )
+    script = " ".join("dread" for _ in range(2000))
+
+    scenes = build_storyboard_scenes(script, provider)
+
+    # A long script is described in batches rather than one oversized request.
+    assert len(provider.calls) > 1
+    assert all(len(call[1]["content"].splitlines()) <= 16 for call in provider.calls)
+    # The scene count is ours: it follows the script, not the model's output.
+    assert len(scenes) == 125
+    assert all(scene["prompt"] for scene in scenes)
+
+
+def test_storyboard_scenes_survive_unusable_llm_output():
     provider = _CountingLLMProvider()
     script = " ".join("dread" for _ in range(2000))
 
     scenes = build_storyboard_scenes(script, provider)
 
-    assert provider.calls == []
-    assert len(scenes) == 48
+    assert len(scenes) == 125
+    assert not any("..." in scene["narration"] for scene in scenes)
     assert all(scene["motion_prompt"] for scene in scenes)
 
 
 def test_storyboard_scenes_within_cap_still_reach_the_llm():
     provider = _CountingLLMProvider(
-        "| STT Scene | Starting Sentence | Scene Visual Description | Target Screen Seconds |\n"
-        "|---|---|---|---|\n"
-        "| 1 | A door opened. | A door opens in a dim corridor. | 3.0 |",
+        "| Scene | Scene Visual Description |\n|---|---|\n| 1 | A door opens in a dim corridor. |",
     )
     script = " ".join("dread" for _ in range(100))
 
@@ -184,7 +200,8 @@ def test_storyboard_job_expands_a_long_approved_script_to_legacy_scene_count(tmp
     runner.run(job["id"])
 
     storyboard = repo.get_episode(episode["id"])["storyboard"]
-    assert len(storyboard) == 48
+    assert len(storyboard) == 75
+    assert not any("..." in scene["narration"] for scene in storyboard)
     assert all(scene["motion_prompt"] for scene in storyboard)
 
 
@@ -202,13 +219,26 @@ def test_storyboard_prompts_restore_the_legacy_narration_first_image_prompt(tmp_
     runner.run(runner.enqueue(episode["id"], "storyboard")["id"])
     prompt = repo.get_episode(episode["id"])["storyboard"][0]["prompt"]
 
-    assert prompt.startswith("A 2.5D horror indie game style illustration. ")
+    assert "16:9" in prompt
+    assert "STYLE LOCK" in prompt
+    assert "2.5D dark comic-book illustration" in prompt
     assert "A door opened at the end of a cedarwood corridor." in prompt
-    assert "dark comic-book aesthetic" not in prompt
-    assert "attached Mr Kane character reference" not in prompt
 
 
-def test_storyboard_job_uses_the_legacy_two_phase_llm_prompt_flow(tmp_path):
+class _ShotTypeDirector:
+    """A SystemOne stub that returns a fixed framing per scene, in order."""
+
+    def __init__(self, shot_types: list[str]) -> None:
+        self.shot_types = shot_types
+        self.index = 0
+
+    def evaluate(self, state, questions):
+        shot_type = self.shot_types[min(self.index, len(self.shot_types) - 1)]
+        self.index += 1
+        return {"shot_duration": 2.0, "shot_type": shot_type, "transition": "cut"}
+
+
+def test_storyboard_does_not_force_the_protagonist_into_every_scene(tmp_path):
     repo = StudioRepository(tmp_path / "studio.db")
     project = repo.create_project("Victor Kane", "")
     episode = repo.create_episode(project["id"], "The corridor", "", "Source")
@@ -216,29 +246,71 @@ def test_storyboard_job_uses_the_legacy_two_phase_llm_prompt_flow(tmp_path):
     repo.transition_episode(episode["id"], "rewritten")
     repo.transition_episode(episode["id"], "awaiting_script_review")
     repo.add_review(episode["id"], "script", "approved")
-    repo.update_episode(episode["id"], script_final="A door opened. The corridor listened.")
-    provider = _SequencedLLMProvider(
-        "| STT Scene | Starting Sentence | Scene Visual Description | Target Screen Seconds |\n"
-        "|---|---|---|---|\n"
-        "| 1 | A door opened. | A frightened man faces an opening door in a dim corridor. | 4.5 |\n"
-        "| 2 | The corridor listened. | A silent corridor narrows around the isolated man. | 2.4 |",
-        "| Stable Diffusion Prompt | Negative Prompt |\n"
-        "|---|---|\n"
-        "| frightened man before an opening door, dim corridor, cinematic horror, moody lighting | blurry, text artifacts |\n"
-        "| silent narrow corridor around an isolated man, cold blue tones, tense composition | extra limbs, oversaturated colors |",
+    repo.update_episode(
+        episode["id"],
+        script_final=(
+            "I entered the drowned manor. The windows gaped like drowned eyes. "
+            "A rusted key lay in the silt. His hand closed over the key."
+        ),
     )
 
-    JobRunner(repo, llm_provider=provider).run(JobRunner(repo, llm_provider=provider).enqueue(episode["id"], "storyboard")["id"])
+    director = _ShotTypeDirector(["wide_establishing", "character_portrait"])
+    runner = JobRunner(repo, systemone_client=director)
+    runner.run(runner.enqueue(episode["id"], "storyboard")["id"])
+    scenes = repo.get_episode(episode["id"])["storyboard"]
+
+    without_character = [scene for scene in scenes if scene.get("shot_type") == "wide_establishing"]
+    assert without_character
+    for scene in without_character:
+        assert "No person in frame" in scene["prompt"]
+        assert "reference image" not in scene["prompt"].lower()
+
+    with_character = [scene for scene in scenes if scene.get("shot_type") == "character_portrait"]
+    assert with_character
+    for scene in with_character:
+        assert "reference image" in scene["prompt"].lower()
+
+
+def test_storyboard_job_uses_the_llm_scene_table_and_builds_nano_banana_prompts(tmp_path):
+    repo = StudioRepository(tmp_path / "studio.db")
+    project = repo.create_project("Victor Kane", "")
+    episode = repo.create_episode(project["id"], "The corridor", "", "Source")
+    repo.transition_episode(episode["id"], "selected")
+    repo.transition_episode(episode["id"], "rewritten")
+    repo.transition_episode(episode["id"], "awaiting_script_review")
+    repo.add_review(episode["id"], "script", "approved")
+    repo.update_episode(
+        episode["id"],
+        script_final=(
+            "A door opened at the end of the dark hallway, and cold air moved through it like breath. "
+            "The corridor listened, breathing with the patience of something that had waited for years."
+        ),
+    )
+    provider = _SequencedLLMProvider(
+        "| Scene | Scene Visual Description |\n"
+        "|---|---|\n"
+        "| 1 | A frightened man faces an opening door in a dim corridor. |\n"
+        "| 2 | A silent corridor narrows around the isolated man. |",
+    )
+
+    JobRunner(repo, llm_provider=provider).run(
+        JobRunner(repo, llm_provider=provider).enqueue(episode["id"], "storyboard")["id"]
+    )
 
     scenes = repo.get_episode(episode["id"])["storyboard"]
     assert len(scenes) == 2
-    assert scenes[0]["target_duration_seconds"] == 4.5
-    assert scenes[0]["prompt"] == "frightened man before an opening door, dim corridor, cinematic horror, moody lighting"
-    assert scenes[0]["negative_prompt"] == "blurry, text artifacts"
-    assert "250-350 characters" in provider.messages[0][0]["content"]
-    assert "1:1 ROW MAPPING" in provider.messages[1][0]["content"]
-    assert "NANO BANANA 2 / PRO IMAGE RULES" in provider.messages[1][0]["content"]
-    assert "2.5D dark comic-book illustration" in provider.messages[1][0]["content"]
+    assert 4.0 <= scenes[0]["target_duration_seconds"] <= 8.0
+    # Narration is the script text the scene covers, not just a marker sentence.
+    assert scenes[0]["narration"].startswith("A door opened at the end")
+    assert scenes[1]["narration"].startswith("The corridor listened")
+    # The prompt is built by the Nano Banana rules, so it always validates.
+    assert "16:9" in scenes[0]["prompt"]
+    assert "STYLE LOCK" in scenes[0]["prompt"]
+    assert "A frightened man faces an opening door in a dim corridor." in scenes[0]["prompt"]
+    assert scenes[0]["negative_prompt"] == NANOBANANA_NEGATIVE_PROMPT
+    assert "120-180 characters" in provider.messages[0][0]["content"]
+    assert "NANO BANANA 2 / PRO IMAGE RULES" in provider.messages[0][0]["content"]
+    assert "2.5D dark comic-book illustration" in provider.messages[0][0]["content"]
 
 
 def test_assets_job_exports_csv_and_prepares_prompts_before_scene_uploads(tmp_path):
@@ -299,6 +371,38 @@ def test_video_job_creates_a_clip_for_every_generated_scene(tmp_path):
     assert updated["status"] == "awaiting_final_review"
 
 
+def test_audio_job_generates_continuous_master_audio_and_manifest(tmp_path):
+    repo = StudioRepository(tmp_path / "studio.db")
+    project = repo.create_project("Victor Kane", "")
+    episode = repo.create_episode(project["id"], "The Voiceover", "", "Source")
+    repo.transition_episode(episode["id"], "selected")
+    repo.transition_episode(episode["id"], "rewritten")
+    repo.transition_episode(episode["id"], "awaiting_script_review")
+    repo.add_review(episode["id"], "script", "approved")
+    repo.update_episode(
+        episode["id"], script_final="A door opened slowly into the cedarwood hall. A cold draft entered."
+    )
+    runner = JobRunner(repo, media_provider=_RecordingMediaProvider(tmp_path))
+    runner.run(runner.enqueue(episode["id"], "storyboard")["id"])
+    repo.add_review(episode["id"], "assets", "approved")
+    _record_uploaded_scene_images(repo, episode["id"], tmp_path)
+    runner.run(runner.enqueue(episode["id"], "assets")["id"])
+
+    audio_res = runner.run(runner.enqueue(episode["id"], "audio")["id"])
+
+    assert audio_res["status"] == "completed"
+    assert "master_audio_path" in audio_res["result"]
+    master_path = Path(audio_res["result"]["master_audio_path"])
+    assert master_path.is_file()
+    assert master_path.name == "full_voiceover.mp3"
+
+    manifest_path = Path(audio_res["result"]["audio_manifest"])
+    assert manifest_path.is_file()
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest_data["master_audio_path"] == str(master_path)
+    assert len(manifest_data["clips"]) > 0
+
+
 class _RecordingMediaProvider:
     def __init__(self, output_root):
         self.output_root = output_root
@@ -342,7 +446,11 @@ def _episode_at_assets_ready(tmp_path):
     repo.transition_episode(episode["id"], "rewritten")
     repo.transition_episode(episode["id"], "awaiting_script_review")
     repo.add_review(episode["id"], "script", "approved")
-    repo.update_episode(episode["id"], script_final="A door opened. A train waited.", storyboard=[{"number": 1, "narration": "A door opened.", "shot": "Wide", "target_duration_seconds": 2.5}])
+    repo.update_episode(
+        episode["id"],
+        script_final="A door opened. A train waited.",
+        storyboard=[{"number": 1, "narration": "A door opened.", "shot": "Wide", "target_duration_seconds": 2.5}],
+    )
     repo.transition_episode(episode["id"], "storyboarded")
     repo.transition_episode(episode["id"], "awaiting_asset_review")
     repo.add_review(episode["id"], "assets", "approved")
@@ -391,7 +499,12 @@ def test_assemble_job_fails_when_ffmpeg_is_missing(tmp_path, monkeypatch):
     repo, episode_id = _episode_at_assets_ready(tmp_path)
     monkeypatch.setattr(jobs_module, "clip_duration_seconds", lambda clip: 6.0)
     monkeypatch.setattr(jobs_module.shutil, "which", lambda name: None)
-    runner = JobRunner(repo, llm_provider=_RecordingLLMProvider('{"edl":[{"scene_number":1,"start_seconds":0,"end_seconds":2,"playback_rate":1,"transition":"cut"}]}'))
+    runner = JobRunner(
+        repo,
+        llm_provider=_RecordingLLMProvider(
+            '{"edl":[{"scene_number":1,"start_seconds":0,"end_seconds":2,"playback_rate":1,"transition":"cut"}]}'
+        ),
+    )
 
     failed = runner.run(runner.enqueue(episode_id, "assemble")["id"])
 
@@ -411,3 +524,37 @@ def test_assemble_job_rejects_an_edl_over_the_directed_duration(tmp_path, monkey
 
     assert failed["status"] == "failed"
     assert "target duration" in failed["error"]
+
+
+def test_assemble_job_cuts_each_scene_to_its_narration_length(tmp_path, monkeypatch):
+    """An editorial retime must never slice a scene's voiceover mid-sentence."""
+    import json
+
+    import app.jobs as jobs_module
+
+    repo, episode_id = _episode_at_assets_ready(tmp_path)
+    scenes = repo.get_episode(episode_id)["storyboard"]
+    scenes[0]["target_duration_seconds"] = 3.0
+    scenes[0]["audio_duration_seconds"] = 3.0
+    repo.update_episode(episode_id, storyboard=scenes)
+
+    # The LLM wants to slow the clip down and start it late, which would cut the narration.
+    retimed = '{"edl":[{"scene_number":1,"start_seconds":1,"end_seconds":6,"playback_rate":0.8,"transition":"cut"}]}'
+    monkeypatch.setattr(jobs_module, "clip_duration_seconds", lambda clip: 6.0)
+    monkeypatch.setattr(jobs_module, "clip_has_audio", lambda clip: True)
+    monkeypatch.setattr(jobs_module.shutil, "which", lambda name: "ffmpeg" if name == "ffmpeg" else None)
+
+    def fake_run(command, **_kwargs):
+        Path(command[-1]).write_bytes(b"final-video")
+        return _FakeCompleted()
+
+    monkeypatch.setattr(jobs_module.subprocess, "run", fake_run)
+    runner = JobRunner(repo, llm_provider=_RecordingLLMProvider(retimed))
+
+    completed = runner.run(runner.enqueue(episode_id, "assemble")["id"])
+
+    assert completed["status"] == "completed"
+    edl = json.loads((tmp_path / "outputs" / episode_id / "edit_decision_list.json").read_text())["edl"]
+    assert edl[0]["start_seconds"] == 0.0
+    assert edl[0]["end_seconds"] == 3.0
+    assert edl[0]["playback_rate"] == 1.0

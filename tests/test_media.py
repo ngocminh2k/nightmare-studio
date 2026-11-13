@@ -1,5 +1,6 @@
 import base64
 import importlib.util
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -8,22 +9,25 @@ import pytest
 
 _spec = importlib.util.find_spec("playwright.sync_api")
 if _spec is not None:
-    import playwright.sync_api
+    import playwright.sync_api  # noqa: E402
 else:
-    playwright = pytest.importorskip("playwright")
+    playwright = pytest.importorskip("playwright")  # noqa: E402
 
-from app.media import (
+from app.media import (  # noqa: E402
     CanvasCDPMediaProvider,
     CanvasCDPSettings,
     DeterministicMediaProvider,
     GoogleFlowCDPMediaProvider,
+    GoogleFlowKitMediaProvider,
     GoogleVeoMediaProvider,
     KiraAIMediaProvider,
+    MAX_VIDEO_DURATION_S,
     MediaNotConfiguredProvider,
     _discover_chrome_path,
     _discover_chrome_user_data_dir,
     _is_cdp_listening,
     build_motion_prompt,
+    clamp_video_duration,
     configured_media_provider,
     parse_motion_prompt_plan,
     public_media_status,
@@ -31,6 +35,37 @@ from app.media import (
     veo_video_prompt_messages,
     veo_video_prompt_plan_messages,
 )
+
+
+def test_video_duration_never_exceeds_ten_seconds():
+    # Omni Flash 1.2 renders up to 15s; the pipeline still caps every clip at 10s.
+    assert MAX_VIDEO_DURATION_S == 10
+    assert clamp_video_duration(15) == 10
+    assert clamp_video_duration(12) == 10
+    assert clamp_video_duration(6) == 6
+    assert clamp_video_duration(None, 8) == 8
+    assert clamp_video_duration(7) in (6, 8)
+    assert clamp_video_duration(0, 6) == 6
+
+
+def test_flow_runner_command_caps_a_longer_duration_request(tmp_path):
+    settings = CanvasCDPSettings(
+        media_mode="google_flow_cdp",
+        image_url="https://flow.google.com/project/test-project",
+        video_url="https://flow.google.com/project/test-project",
+        flow_runner_backend="ts",
+        flow_runner_path=str(tmp_path / "runner.ts"),
+        flow_video_duration=15,
+    )
+
+    cmd = GoogleFlowCDPMediaProvider(settings)._build_runner_command(
+        media_kind="video",
+        prompt="slow push in",
+        output_path=tmp_path / "clip.mp4",
+        url="https://flow.google.com/project/test-project",
+    )
+
+    assert cmd[cmd.index("--duration") + 1] == "10"
 
 
 def test_motion_prompt_preserves_scene_composition_and_uses_controlled_camera_motion():
@@ -121,9 +156,7 @@ def test_google_flow_resolves_a_relative_artifact_url_against_its_workspace_page
 
 
 def test_google_flow_uses_the_authenticated_browser_session_for_its_media_endpoint():
-    assert GoogleFlowCDPMediaProvider._requires_browser_fetch(
-        "/fx/api/trpc/media.getMediaUrlRedirect?name=artifact"
-    )
+    assert GoogleFlowCDPMediaProvider._requires_browser_fetch("/fx/api/trpc/media.getMediaUrlRedirect?name=artifact")
 
 
 def test_google_flow_downloads_protected_artifacts_through_the_browser_request_context(tmp_path):
@@ -215,7 +248,13 @@ def test_google_flow_generates_image_and_video_through_the_authenticated_cdp_ses
             return "/fx/api/trpc/media.getMediaUrlRedirect?name=artifact" if name == "src" else None
 
         def evaluate_all(self, script):
-            return ["profile.jpg", *[f"/fx/api/trpc/media.getMediaUrlRedirect?name=scene-{number}" for number in range(page.generation, 0, -1)]]
+            return [
+                "profile.jpg",
+                *[
+                    f"/fx/api/trpc/media.getMediaUrlRedirect?name=scene-{number}"
+                    for number in range(page.generation, 0, -1)
+                ],
+            ]
 
         def locator(self, selector):
             return Locator(selector)
@@ -293,16 +332,18 @@ def test_google_flow_generates_image_and_video_through_the_authenticated_cdp_ses
     assert ("click", GoogleFlowCDPMediaProvider._REFERENCE_MENU_SELECTOR) in calls
     assert ("click", GoogleFlowCDPMediaProvider._REFERENCE_UPLOAD_SELECTOR) in calls
     assert ("click", GoogleFlowCDPMediaProvider._REFERENCE_CONFIRM_SELECTOR) in calls
-    assert calls.index(("fill", "A corridor")) < calls.index(("click", GoogleFlowCDPMediaProvider._REFERENCE_MENU_SELECTOR))
+    assert calls.index(("fill", "A corridor")) < calls.index(
+        ("click", GoogleFlowCDPMediaProvider._REFERENCE_MENU_SELECTOR)
+    )
     assert calls.index(("click", GoogleFlowCDPMediaProvider._REFERENCE_MENU_SELECTOR)) < calls.index(
         ("click", GoogleFlowCDPMediaProvider._REFERENCE_UPLOAD_SELECTOR)
     )
     assert calls.index(("click", GoogleFlowCDPMediaProvider._REFERENCE_UPLOAD_SELECTOR)) < calls.index(
         ("upload", (GoogleFlowCDPMediaProvider._REFERENCE_FILE_INPUT_SELECTOR, str(reference_path)))
     )
-    assert calls.index(("upload", (GoogleFlowCDPMediaProvider._REFERENCE_FILE_INPUT_SELECTOR, str(reference_path)))) < calls.index(
-        ("click", GoogleFlowCDPMediaProvider._REFERENCE_CONFIRM_SELECTOR)
-    )
+    assert calls.index(
+        ("upload", (GoogleFlowCDPMediaProvider._REFERENCE_FILE_INPUT_SELECTOR, str(reference_path)))
+    ) < calls.index(("click", GoogleFlowCDPMediaProvider._REFERENCE_CONFIRM_SELECTOR))
 
 
 def test_google_flow_uploads_the_mr_kane_reference_before_generating_an_image(monkeypatch, tmp_path):
@@ -419,9 +460,9 @@ def test_connect_cdp_auto_launches_browser_when_offline(monkeypatch):
             raise ConnectionRefusedError("Port 9222 not open")
         return mock_browser
 
-    mock_playwright = type("Playwright", (), {
-        "chromium": type("Chromium", (), {"connect_over_cdp": staticmethod(mock_connect)})()
-    })()
+    mock_playwright = type(
+        "Playwright", (), {"chromium": type("Chromium", (), {"connect_over_cdp": staticmethod(mock_connect)})()}
+    )()
 
     settings = CanvasCDPSettings(
         media_mode="canvas_cdp",
@@ -445,9 +486,9 @@ def test_connect_cdp_fails_closed_when_auto_launch_disabled():
     def mock_connect(url):
         raise ConnectionRefusedError("Port 9222 not open")
 
-    mock_playwright = type("Playwright", (), {
-        "chromium": type("Chromium", (), {"connect_over_cdp": staticmethod(mock_connect)})()
-    })()
+    mock_playwright = type(
+        "Playwright", (), {"chromium": type("Chromium", (), {"connect_over_cdp": staticmethod(mock_connect)})()}
+    )()
 
     settings = CanvasCDPSettings(
         media_mode="canvas_cdp",
@@ -644,6 +685,20 @@ def test_parse_motion_prompt_plan():
     with pytest.raises(ValueError, match="must provide one non-empty prompt for every scene"):
         parse_motion_prompt_plan('{"scenes": [{"number": 1, "motion_prompt": ""}]}', {1})
 
+    from app.media import generate_veo_prompt_plan
+
+    class FakeLLM:
+        def generate(self, messages):
+            return '{"scenes": [{"number": 1, "motion_prompt": "Slow camera push-in on subject 1"}, {"number": 2, "motion_prompt": "Slow camera push-in on subject 2"}]}'
+
+    scenes = [
+        {"number": 1, "shot": "Wide", "narration": "Night"},
+        {"number": 2, "shot": "Close-up", "narration": "Face"},
+    ]
+    prompts = generate_veo_prompt_plan(scenes, FakeLLM(), batch_size=2)
+    assert prompts[1] == "Slow camera push-in on subject 1"
+    assert prompts[2] == "Slow camera push-in on subject 2"
+
 
 def test_cdp_port_open_and_chrome_discovery(monkeypatch, tmp_path):
     assert _is_cdp_listening("http://127.0.0.1:59999", timeout=0.05) is False
@@ -660,6 +715,48 @@ def test_cdp_port_open_and_chrome_discovery(monkeypatch, tmp_path):
     assert custom_profile.is_dir()
 
 
+def _write_account_registry(path: Path, active: int, accounts: list[dict[str, object]]) -> None:
+    path.write_text(json.dumps({"active_account": active, "accounts": accounts}), encoding="utf-8")
 
 
+def test_flowkit_provider_follows_the_active_account_registry(monkeypatch, tmp_path):
+    registry = tmp_path / "flow-accounts.json"
+    _write_account_registry(
+        registry,
+        2,
+        [{"id": 1, "project_id": "project-one"}, {"id": 2, "project_id": "project-two"}],
+    )
+    monkeypatch.setattr(GoogleFlowKitMediaProvider, "_ACCOUNTS_FILE", registry)
+    monkeypatch.setenv("NIGHTMARE_FLOWKIT_URL", "http://127.0.0.1:8100")
+    monkeypatch.setenv("NIGHTMARE_FLOWKIT_PROJECT", "project-one")
+    monkeypatch.delenv("NIGHTMARE_FLOWKIT_POOL_URL", raising=False)
 
+    provider = GoogleFlowKitMediaProvider(CanvasCDPSettings.from_environment())
+
+    assert provider.project_id == "project-two"
+
+    _write_account_registry(registry, 1, [{"id": 1, "project_id": "project-one"}])
+
+    assert provider.project_id == "project-one"
+
+
+def test_flowkit_character_reference_is_reuploaded_when_the_account_changes(monkeypatch, tmp_path):
+    reference = tmp_path / "reference.png"
+    reference.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 12_000)
+    monkeypatch.setenv("NIGHTMARE_FLOW_CHARACTER_REFERENCE_PATH", str(reference))
+    monkeypatch.delenv("NIGHTMARE_FLOWKIT_POOL_URL", raising=False)
+
+    provider = GoogleFlowKitMediaProvider(CanvasCDPSettings.from_environment())
+    uploads: list[str] = []
+
+    def fake_upload(path: Path, base: str = "", project_id: str = "") -> str:
+        uploads.append(project_id)
+        return f"media-{project_id}"
+
+    monkeypatch.setattr(provider, "_upload_image", fake_upload)
+
+    assert provider._character_media_id("http://flowkit", "project-one") == "media-project-one"
+    assert provider._character_media_id("http://flowkit", "project-two") == "media-project-two"
+    assert provider._character_media_id("http://flowkit", "project-one") == "media-project-one"
+
+    assert uploads == ["project-one", "project-two"]

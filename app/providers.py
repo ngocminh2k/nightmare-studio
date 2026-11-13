@@ -51,8 +51,8 @@ class ProviderSettings:
     router_base_url: str = "http://localhost:20128/v1"
     router_api_key: str = ""
     router_send_auth: bool = True
-    llm_model: str = "mrkane"
-    llm_fallback_model: str = "gemini/gemini-3-flash-preview"
+    llm_model: str = "minh"
+    llm_fallback_model: str = "cl/google/gemini-3.8-flash"
     llm_timeout_seconds: int = 600
     llm_max_retries: int = 3
     llm_retry_delay_seconds: int = 15
@@ -61,6 +61,14 @@ class ProviderSettings:
     def from_environment(cls) -> "ProviderSettings":
         llm_mode = os.environ.get("NIGHTMARE_LLM_MODE", "router").lower()
         router_api_key = os.environ.get("NIGHTMARE_LLM_API_KEY", "") or _local_router_api_key()
+        raw_model = os.environ.get("NIGHTMARE_LLM_MODEL", "").strip()
+        model = raw_model if raw_model and raw_model != "mrkane" else "minh"
+        raw_fallback = os.environ.get("NIGHTMARE_LLM_FALLBACK_MODEL", "").strip()
+        fallback = (
+            raw_fallback
+            if raw_fallback and raw_fallback != "gemini/gemini-3-flash-preview"
+            else "cl/google/gemini-3.8-flash"
+        )
 
         return cls(
             openai_api_key=os.environ.get("NIGHTMARE_OPENAI_API_KEY", ""),
@@ -70,8 +78,8 @@ class ProviderSettings:
             router_base_url=os.environ.get("NIGHTMARE_LLM_BASE_URL", "http://localhost:20128/v1"),
             router_api_key=router_api_key,
             router_send_auth=os.environ.get("NIGHTMARE_LLM_SEND_AUTH", "true").lower() in {"1", "true", "yes"},
-            llm_model=os.environ.get("NIGHTMARE_LLM_MODEL", "mrkane"),
-            llm_fallback_model=os.environ.get("NIGHTMARE_LLM_FALLBACK_MODEL", "gemini/gemini-3-flash-preview"),
+            llm_model=model,
+            llm_fallback_model=fallback,
             llm_timeout_seconds=int(os.environ.get("NIGHTMARE_LLM_TIMEOUT_SECONDS", "600")),
             llm_max_retries=int(os.environ.get("NIGHTMARE_LLM_MAX_RETRIES", "3")),
             llm_retry_delay_seconds=int(os.environ.get("NIGHTMARE_LLM_RETRY_DELAY_SECONDS", "15")),
@@ -180,11 +188,13 @@ class RouterLLMProvider:
         return [model for index, model in enumerate(candidates) if model and model not in candidates[:index]]
 
     def _request(self, model: str, messages: list[ChatMessage]) -> str:
-        payload = json.dumps({"model": model, "messages": messages}).encode("utf-8")
+        payload = json.dumps({"model": model, "messages": messages, "stream": False}).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.settings.router_api_key and self.settings.router_send_auth:
             headers["Authorization"] = f"Bearer {self.settings.router_api_key}"
-        request = Request(f"{self.settings.router_base_url.rstrip('/')}/chat/completions", data=payload, headers=headers)
+        request = Request(
+            f"{self.settings.router_base_url.rstrip('/')}/chat/completions", data=payload, headers=headers
+        )
         with self._opener(request, timeout=self.settings.llm_timeout_seconds) as response:
             raw = response.read().decode("utf-8")
         return parse_chat_completion(raw)

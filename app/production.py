@@ -68,6 +68,9 @@ class EpisodeProductionService:
         if episode["status"] == EpisodeStatus.AUDIO_READY.value:
             self._run_job(episode_id, "video")
         episode = self._episode(episode_id)
+        if episode["status"] == EpisodeStatus.VIDEO_READY.value:
+            self._run_quality_gate(episode_id)
+        episode = self._episode(episode_id)
         if episode["status"] == EpisodeStatus.AWAITING_FINAL_REVIEW.value:
             self._export_package(episode_id)
         return self._episode(episode_id)
@@ -81,9 +84,33 @@ class EpisodeProductionService:
         scenes = episode["storyboard"]
         if not scenes:
             raise ValueError("Episode has no storyboard for a package rebuild")
-        self.repository.add_activity(episode_id, "workflow", f"Re-exported {len(scenes)} scene package before final review")
+        self.repository.add_activity(
+            episode_id, "workflow", f"Re-exported {len(scenes)} scene package before final review"
+        )
         self._export_package(episode_id)
         return self._episode(episode_id)
+
+    def _run_quality_gate(self, episode_id: str) -> None:
+        """Run heuristic quality gate after video render. Transitions to AWAITING_FINAL_REVIEW.
+
+        If score < 8.0: records failing dimensions in activity log (blind — no patch history).
+        Never blocks the pipeline; lets CLI/MCP decide whether to regenerate.
+        """
+        from .quality_gate import run_quality_gate
+
+        db_path = self.repository.database_path
+        result = run_quality_gate(episode_id, db_path)
+        score = result["avg"]
+        passed = result["pass"]
+
+        dims = "; ".join(f"{d}={s:.1f}" for d, s in result["scores"].items())
+        note = f"Quality gate {'PASS' if passed else 'FAIL'} {score:.1f}/10 — {dims}"
+        self.repository.add_activity(episode_id, "quality_gate", note)
+        self.repository.transition_episode(
+            episode_id,
+            EpisodeStatus.AWAITING_FINAL_REVIEW,
+            note,
+        )
 
     def _run_job(self, episode_id: str, kind: str) -> None:
         job = self.runner.enqueue(episode_id, kind)
@@ -101,7 +128,9 @@ class EpisodeProductionService:
             self.repository.update_episode(episode_id, output_path=str(output_dir))
         episode = self._episode(episode_id)
         manifest = self.repository.episode_manifest(episode_id)
-        (output_dir / "episode_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        (output_dir / "episode_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         write_image_prompt_csv(output_dir / "image_prompts.csv", episode["storyboard"])
         self._write_storyboard_html(output_dir / "storyboard.html", episode)
 

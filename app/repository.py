@@ -147,15 +147,26 @@ class StudioRepository:
 
     def find_project_by_name(self, name: str) -> dict[str, Any] | None:
         with self._connection() as conn:
-            return self._row(conn.execute("SELECT * FROM projects WHERE name = ? ORDER BY created_at LIMIT 1", (name.strip(),)).fetchone())
+            return self._row(
+                conn.execute(
+                    "SELECT * FROM projects WHERE name = ? ORDER BY created_at LIMIT 1", (name.strip(),)
+                ).fetchone()
+            )
 
     def update_project(self, project_id: str, **changes: str) -> dict[str, Any] | None:
-        allowed = {key: value.strip() for key, value in changes.items() if key in {"name", "description", "brand_bible"} and value is not None}
+        allowed = {
+            key: value.strip()
+            for key, value in changes.items()
+            if key in {"name", "description", "brand_bible"} and value is not None
+        }
         if not allowed:
             return self.get_project(project_id)
         columns = ", ".join(f"{key} = ?" for key in allowed)
         with self._connection() as conn:
-            conn.execute(f"UPDATE projects SET {columns}, updated_at = ? WHERE id = ?", (*allowed.values(), utc_now(), project_id))
+            conn.execute(
+                f"UPDATE projects SET {columns}, updated_at = ? WHERE id = ?",
+                (*allowed.values(), utc_now(), project_id),
+            )
         return self.get_project(project_id)
 
     def create_episode(self, project_id: str, title: str, source_url: str, source_text: str) -> dict[str, Any]:
@@ -166,7 +177,16 @@ class StudioRepository:
             conn.execute(
                 """INSERT INTO episodes(id, project_id, title, source_url, source_text, status, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (episode_id, project_id, title.strip(), source_url.strip(), source_text.strip(), EpisodeStatus.DISCOVERED.value, now, now),
+                (
+                    episode_id,
+                    project_id,
+                    title.strip(),
+                    source_url.strip(),
+                    source_text.strip(),
+                    EpisodeStatus.DISCOVERED.value,
+                    now,
+                    now,
+                ),
             )
         return self.get_episode(episode_id)  # type: ignore[return-value]
 
@@ -196,12 +216,29 @@ class StudioRepository:
         with self._connection() as conn:
             return self._episode_row(conn.execute("SELECT * FROM episodes WHERE id = ?", (episode_id,)).fetchone())
 
+    def delete_episode(self, episode_id: str) -> bool:
+        with self._connection() as conn:
+            cursor = conn.execute("DELETE FROM episodes WHERE id = ?", (episode_id,))
+            return cursor.rowcount > 0
+
     def get_project_episode(self, project_id: str, episode_id: str) -> dict[str, Any] | None:
         with self._connection() as conn:
-            return self._episode_row(conn.execute("SELECT * FROM episodes WHERE id = ? AND project_id = ?", (episode_id, project_id)).fetchone())
+            return self._episode_row(
+                conn.execute(
+                    "SELECT * FROM episodes WHERE id = ? AND project_id = ?", (episode_id, project_id)
+                ).fetchone()
+            )
 
     def update_episode(self, episode_id: str, **changes: Any) -> dict[str, Any] | None:
-        allowed_keys = {"title", "source_url", "source_text", "script_draft", "script_final", "cost_total", "output_path"}
+        allowed_keys = {
+            "title",
+            "source_url",
+            "source_text",
+            "script_draft",
+            "script_final",
+            "cost_total",
+            "output_path",
+        }
         allowed = {key: value for key, value in changes.items() if key in allowed_keys}
         if "storyboard" in changes:
             allowed["storyboard_json"] = json.dumps(changes["storyboard"], ensure_ascii=False)
@@ -209,7 +246,10 @@ class StudioRepository:
             return self.get_episode(episode_id)
         columns = ", ".join(f"{key} = ?" for key in allowed)
         with self._connection() as conn:
-            conn.execute(f"UPDATE episodes SET {columns}, updated_at = ? WHERE id = ?", (*allowed.values(), utc_now(), episode_id))
+            conn.execute(
+                f"UPDATE episodes SET {columns}, updated_at = ? WHERE id = ?",
+                (*allowed.values(), utc_now(), episode_id),
+            )
         return self.get_episode(episode_id)
 
     def transition_episode(self, episode_id: str, target: EpisodeStatus | str, note: str = "") -> dict[str, Any]:
@@ -220,7 +260,10 @@ class StudioRepository:
         if not can_transition(episode["status"], target_status):
             raise ValueError(f"Cannot transition from {episode['status']} to {target_status.value}")
         with self._connection() as conn:
-            conn.execute("UPDATE episodes SET status = ?, updated_at = ? WHERE id = ?", (target_status.value, utc_now(), episode_id))
+            conn.execute(
+                "UPDATE episodes SET status = ?, updated_at = ? WHERE id = ?",
+                (target_status.value, utc_now(), episode_id),
+            )
         if note:
             self.add_activity(episode_id, "workflow", note)
         return self.get_episode(episode_id)  # type: ignore[return-value]
@@ -237,7 +280,10 @@ class StudioRepository:
         # A review decision must move the episode, or the operator is stranded at the gate:
         # approving advances, requesting changes sends the work back to be redone. Gates
         # outside the workflow (e.g. "source") are records only and move nothing.
-        resolve, verb = {"approved": (approved_status, "approved"), "changes_requested": (rejected_status, "changes requested")}[decision]
+        resolve, verb = {
+            "approved": (approved_status, "approved"),
+            "changes_requested": (rejected_status, "changes requested"),
+        }[decision]
         expected = review_gate_status(gate)
         episode = self.get_episode(episode_id)
         if episode and expected and episode["status"] == expected.value:
@@ -247,7 +293,9 @@ class StudioRepository:
 
     def list_reviews(self, episode_id: str) -> list[dict[str, Any]]:
         with self._connection() as conn:
-            rows = conn.execute("SELECT * FROM reviews WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM reviews WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def create_job(self, episode_id: str, kind: str) -> dict[str, Any]:
@@ -269,7 +317,9 @@ class StudioRepository:
 
     def list_jobs(self, episode_id: str) -> list[dict[str, Any]]:
         with self._connection() as conn:
-            rows = conn.execute("SELECT * FROM jobs WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM jobs WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)
+            ).fetchall()
         items = []
         for row in rows:
             item = dict(row)
@@ -277,7 +327,15 @@ class StudioRepository:
             items.append(item)
         return items
 
-    def update_job(self, job_id: str, *, status: str | None = None, progress: int | None = None, error: str | None = None, result: dict[str, Any] | None = None) -> dict[str, Any]:
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        progress: int | None = None,
+        error: str | None = None,
+        result: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if status is not None:
             fields["status"] = status
@@ -319,7 +377,9 @@ class StudioRepository:
 
     def list_activity(self, episode_id: str) -> list[dict[str, Any]]:
         with self._connection() as conn:
-            rows = conn.execute("SELECT * FROM episode_events WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)).fetchall()
+            rows = conn.execute(
+                "SELECT * FROM episode_events WHERE episode_id = ? ORDER BY created_at DESC", (episode_id,)
+            ).fetchall()
         return [dict(row) for row in rows]
 
     def dashboard(self) -> dict[str, Any]:

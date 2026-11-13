@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "nightmare-studio": {
+      "command": "python",
+      "args": ["-m", "uvicorn", "app.mcp_server:app", "--host", "127.0.0.1", "--port", "8200"],
+      "cwd": "F:\\truyen_ma\\nightmare_studio",
+      "env": {}
+    }
+  }
+}

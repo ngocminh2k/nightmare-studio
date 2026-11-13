@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Flow Pool Monitor</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --bg:       #0d1117;
+  --surface:  #161b22;
+  --card:     #21262d;
+  --border:   #30363d;
+  --text:     #e6edf3;
+  --muted:    #7d8590;
+  --blue:     #58a6ff;
+  --green:    #3fb950;
+  --yellow:   #d29922;
+  --red:      #f85149;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  padding-inline: 16px;
+}
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.header-title {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--blue);
+  flex: 1;
+}
+.header-meta { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); }
+.active-chip {
+  font-size: 11px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 15%, transparent);
+  color: var(--green);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+}
+.summary {
+  display: flex; gap: 8px; padding: 10px 0;
+  overflow-x: auto; scrollbar-width: none;
+}
+.summary::-webkit-scrollbar { display: none; }
+.stat-tile {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 14px; min-width: 90px; flex-shrink: 0;
+}
+.stat-tile .val {
+  font-family: 'JetBrains Mono', monospace; font-size: 20px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.stat-tile .lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-top: 1px; }
+.val.blue  { color: var(--blue); }
+.val.green { color: var(--green); }
+.val.yellow{ color: var(--yellow); }
+.val.red   { color: var(--red); }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding-block: 12px 24px;
+}
+@media (max-width: 900px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 480px) { .grid { grid-template-columns: 1fr; } }
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  transition: border-color .2s; position: relative;
+}
+.card.active   { border-color: var(--blue); box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 20%, transparent); }
+.card.warning  { border-color: var(--yellow); }
+.card.depleted { border-color: var(--red); opacity: .7; }
+.card.active::before {
+  content: ''; position: absolute; top: 12px; right: 12px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--blue); animation: pulse 1.8s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%,100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .4; transform: scale(1.5); }
+}
+.card-top { display: flex; align-items: center; gap: 8px; }
+.acct-id  { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; flex: 1; }
+.status-chip {
+  font-size: 10px; font-weight: 600; padding: 2px 7px;
+  border-radius: 999px; text-transform: uppercase; letter-spacing: .05em;
+}
+.chip-ready    { background: color-mix(in srgb,var(--green)  15%,transparent); color: var(--green);  border: 1px solid color-mix(in srgb,var(--green)  30%,transparent); }
+.chip-active   { background: color-mix(in srgb,var(--blue)   15%,transparent); color: var(--blue);   border: 1px solid color-mix(in srgb,var(--blue)   30%,transparent); }
+.chip-low      { background: color-mix(in srgb,var(--yellow) 15%,transparent); color: var(--yellow); border: 1px solid color-mix(in srgb,var(--yellow) 30%,transparent); }
+.chip-depleted { background: color-mix(in srgb,var(--red)    15%,transparent); color: var(--red);    border: 1px solid color-mix(in srgb,var(--red)    30%,transparent); }
+.chip-offline  { background: color-mix(in srgb,var(--muted)  15%,transparent); color: var(--muted);  border: 1px solid color-mix(in srgb,var(--muted)  30%,transparent); }
+.credit-row { display: flex; align-items: center; gap: 8px; }
+.credit-num {
+  font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 600;
+  font-variant-numeric: tabular-nums; min-width: 44px;
+}
+.credit-bar-wrap { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.credit-bar { height: 100%; border-radius: 3px; transition: width .6s ease, background .4s; }
+.stats-row { display: flex; gap: 6px; }
+.mini-stat { flex: 1; background: var(--surface); border-radius: 6px; padding: 6px 8px; }
+.mini-stat .ms-val { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.mini-stat .ms-lbl { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.log-line {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 14px;
+}
+.port-badge {
+  font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px;
+}
+.switch-banner {
+  display: none;
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, transparent);
+  border-radius: 6px; padding: 8px 12px; font-size: 12px; color: var(--yellow);
+  align-items: center; gap: 6px; margin-bottom: 8px;
+}
+.switch-banner.show { display: flex; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="header-title">⬡ flow-pool-monitor</span>
+  <span class="active-chip" id="active-label">● acct-01 active</span>
+  <span class="header-meta" id="last-update">–</span>
+</div>
+
+<div class="summary">
+  <div class="stat-tile"><div class="val blue"   id="s-online">0</div><div class="lbl">Online</div></div>
+  <div class="stat-tile"><div class="val green"  id="s-credits">0</div><div class="lbl">Tổng credit</div></div>
+  <div class="stat-tile"><div class="val"        id="s-jobs">0</div><div class="lbl">Jobs xong</div></div>
+  <div class="stat-tile"><div class="val yellow" id="s-low">0</div><div class="lbl">Sắp hết</div></div>
+  <div class="stat-tile"><div class="val red"    id="s-depleted">0</div><div class="lbl">Hết credit</div></div>
+</div>
+
+<div class="switch-banner" id="switch-banner">
+  ⚠ Auto-switch: <strong id="switch-reason"></strong>
+</div>
+
+<div class="grid" id="pool-grid"></div>
+
+<script>
+const ACCOUNTS = [
+  { id: 'acct-01', port: 9222, apiPort: 8000 },
+  { id: 'acct-02', port: 9223, apiPort: 8001 },
+  { id: 'acct-03', port: 9224, apiPort: 8002 },
+  { id: 'acct-04', port: 9225, apiPort: 8003 },
+  { id: 'acct-05', port: 9226, apiPort: 8004 },
+  { id: 'acct-06', port: 9227, apiPort: 8005 },
+  { id: 'acct-07', port: 9228, apiPort: 8006 },
+  { id: 'acct-08', port: 9229, apiPort: 8007 },
+];
+
+const state = {
+  accounts: ACCOUNTS.map((a, i) => ({
+    ...a,
+    status:    i === 0 ? 'active' : i < 5 ? 'ready' : i === 5 ? 'low' : i === 6 ? 'depleted' : 'offline',
+    credits:   [47, 120, 85, 63, 22, 7, 0, null][i],
+    maxCredits: 150,
+    jobsDone:  [28, 0, 15, 0, 0, 0, 0, 0][i],
+    jobsFailed:[1,  0, 0,  0, 0, 0, 0, 0][i],
+    lastLog:   i === 0 ? 'scene-142 OK (4.2s)' : i === 5 ? 'credit < 10 — switch queued' : i === 6 ? 'credit exhausted' : i === 7 ? 'CDP offline' : 'idle',
+  })),
+  totalJobs: 43,
+};
+
+const creditColor = (c, max) => {
+  if (c === null) return 'var(--muted)';
+  const p = c / max;
+  return p > .3 ? 'var(--green)' : p > .07 ? 'var(--yellow)' : 'var(--red)';
+};
+
+const chipClass  = s => ({ active:'chip-active', ready:'chip-ready', low:'chip-low', depleted:'chip-depleted', offline:'chip-offline' })[s] || 'chip-offline';
+const chipLabel  = s => ({ active:'ACTIVE', ready:'READY', low:'LOW', depleted:'EMPTY', offline:'OFFLINE' })[s] || s.toUpperCase();
+
+function renderGrid() {
+  document.getElementById('pool-grid').innerHTML = state.accounts.map(a => {
+    const cardCls = a.status === 'active' ? 'card active'
+                  : a.status === 'low'     ? 'card warning'
+                  : a.status === 'depleted'? 'card depleted' : 'card';
+    const bc  = creditColor(a.credits, a.maxCredits);
+    const bw  = a.credits === null ? 0 : Math.round(a.credits / a.maxCredits * 100);
+    const cn  = a.credits === null ? '—' : a.credits;
+    return `<div class="${cardCls}">
+      <div class="card-top">
+        <span class="acct-id">${a.id}</span>
+        <span class="port-badge">:${a.port}</span>
+        <span class="status-chip ${chipClass(a.status)}">${chipLabel(a.status)}</span>
+      </div>
+      <div class="credit-row">
+        <span class="credit-num" style="color:${bc}">${cn}</span>
+        <div class="credit-bar-wrap"><div class="credit-bar" style="width:${bw}%;background:${bc}"></div></div>
+        <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted)">/${a.maxCredits}</span>
+      </div>
+      <div class="stats-row">
+        <div class="mini-stat"><div class="ms-val">${a.jobsDone}</div><div class="ms-lbl">done</div></div>
+        <div class="mini-stat"><div class="ms-val" style="color:${a.jobsFailed>0?'var(--red)':'inherit'}">${a.jobsFailed}</div><div class="ms-lbl">fail</div></div>
+        <div class="mini-stat"><div class="ms-val">:${a.apiPort}</div><div class="ms-lbl">api</div></div>
+      </div>
+      <div class="log-line" title="${a.lastLog}">${a.lastLog}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderSummary() {
+  const online   = state.accounts.filter(a => a.status !== 'offline').length;
+  const credits  = state.accounts.reduce((s,a) => s + (a.credits||0), 0);
+  const low      = state.accounts.filter(a => a.status === 'low').length;
+  const depleted = state.accounts.filter(a => a.status === 'depleted').length;
+  document.getElementById('s-online').textContent   = online;
+  document.getElementById('s-credits').textContent  = credits;
+  document.getElementById('s-jobs').textContent     = state.totalJobs;
+  document.getElementById('s-low').textContent      = low;
+  document.getElementById('s-depleted').textContent = depleted;
+  const active = state.accounts.find(a => a.status === 'active');
+  document.getElementById('active-label').textContent = active ? `● ${active.id} active` : '● none active';
+  document.getElementById('last-update').textContent  = 'updated ' + new Date().toLocaleTimeString('vi-VN');
+}
+
+function checkSwitch() {
+  const cur  = state.accounts.find(a => a.status === 'active');
+  if (!cur || cur.credits === null) return;
+  if (cur.credits < 10) {
+    const next = state.accounts.find(a => a.status === 'ready');
+    if (next) {
+      cur.status  = cur.credits === 0 ? 'depleted' : 'low';
+      next.status = 'active';
+      document.getElementById('switch-reason').textContent =
+        `${cur.id} (${cur.credits} credit) → ${next.id}`;
+      const b = document.getElementById('switch-banner');
+      b.classList.add('show');
+      setTimeout(() => b.classList.remove('show'), 7000);
+    }
+  }
+}
+
+function render() { renderGrid(); renderSummary(); }
+
+async function poll() {
+  try {
+    // Real endpoint: GET http://127.0.0.1:8000/api/pool-status
+    // Expected: { accounts:[{id,credits,status,jobsDone,jobsFailed,lastLog}], totalJobs }
+    const r = await fetch('http://127.0.0.1:8000/api/pool-status', { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) throw 0;
+    const data = await r.json();
+    data.accounts.forEach(d => {
+      const a = state.accounts.find(x => x.id === d.id);
+      if (a) Object.assign(a, d);
+    });
+    if (data.totalJobs != null) state.totalJobs = data.totalJobs;
+  } catch {
+    // demo: simulate consumption
+    const active = state.accounts.find(a => a.status === 'active');
+    if (active && active.credits !== null && active.credits > 0) {
+      active.credits = Math.max(0, active.credits - 1);
+      active.jobsDone++;
+      active.lastLog = `scene-${state.totalJobs + 1} OK`;
+      state.totalJobs++;
+    }
+  }
+  checkSwitch();
+  render();
+}
+
+render();
+poll();
+setInterval(poll, 5000);
+</script>
+</body>
+</html>

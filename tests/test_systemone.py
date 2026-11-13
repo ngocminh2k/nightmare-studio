@@ -190,7 +190,7 @@ class TestRouterSystemOneClient:
         assert req.headers["Content-type"] == "application/json"
 
         body = json.loads(req.data.decode("utf-8"))
-        assert body["model"] == "oc/jev-1.13-free"
+        assert body["model"] == "openrouter/typesafe/jev-1.13"
         assert body["state"] == "He looked at the small key."
         assert "shot_duration" in body["questions"]
         assert result["shot_duration"] == 1.0
@@ -222,8 +222,8 @@ class TestApplyDirectorPacingIntegration:
     def test_apply_director_pacing_with_deterministic_systemone_client(self) -> None:
         scenes = [
             {"number": 1, "narration": "A branch snapped as something lunged from the shadows."},  # Action -> 4.0s
-            {"number": 2, "narration": "The porcelain doll stared into the silence."},           # Dread -> 8.0s
-            {"number": 3, "narration": "Victor Kane continued down the dimly lit alley."},       # Mid -> 6.0s
+            {"number": 2, "narration": "The porcelain doll stared into the silence."},  # Dread -> 8.0s
+            {"number": 3, "narration": "Victor Kane continued down the dimly lit alley."},  # Mid -> 6.0s
         ]
         script = " ".join(scene["narration"] for scene in scenes)
         client = DeterministicSystemOneClient()
@@ -247,9 +247,9 @@ class TestApplyDirectorPacingIntegration:
 
     def test_apply_director_pacing_preserves_and_clamps_directed_target(self) -> None:
         scenes = [
-            {"number": 1, "narration": "Action scene", "target_duration_seconds": 2.5},   # Clamped up to 4.0
-            {"number": 2, "narration": "Valid target", "target_duration_seconds": 5.5},   # Preserved at 5.5
-            {"number": 3, "narration": "Long scene", "target_duration_seconds": 12.0},    # Clamped down to 8.0
+            {"number": 1, "narration": "Action scene", "target_duration_seconds": 2.5},  # Clamped up to 4.0
+            {"number": 2, "narration": "Valid target", "target_duration_seconds": 5.5},  # Preserved at 5.5
+            {"number": 3, "narration": "Long scene", "target_duration_seconds": 12.0},  # Clamped down to 8.0
         ]
         script = "Action scene. Valid target. Long scene."
         client = DeterministicSystemOneClient()
@@ -272,9 +272,14 @@ class TestApplyDirectorPacingIntegration:
         assert len(result) == 2
         # Durations are set and clamped within [4.0, 8.0]
         assert all(4.0 <= s["target_duration_seconds"] <= 8.0 for s in result)
-        # When client is None, shot_type and transition should not be overwritten/added
-        assert "shot_type" not in result[0]
-        assert "transition" not in result[0]
+        # Offline fallback still has to decide framing: the prompt builder reads
+        # shot_type to know whether the protagonist is in frame.
+        assert result[0]["shot_type"] in {
+            "close_up_detail",
+            "wide_establishing",
+            "character_portrait",
+        }
+        assert result[0]["transition"] in {"cut", "dissolve", "fade_black"}
         # Script budget metadata preserved
         assert "script_duration_seconds" in result[0]
         assert "visual_duration_budget_seconds" in result[0]
@@ -299,11 +304,14 @@ class TestApplyDirectorPacingIntegration:
         def invalid_opener(request: Any, timeout: int = 30) -> MockResponse:
             class NonDictResponse:
                 def read(self) -> bytes:
-                    return b"\"plain string\""
+                    return b'"plain string"'
+
                 def __enter__(self) -> Self:
                     return self
+
                 def __exit__(self, *args: object) -> None:
                     pass
+
             return NonDictResponse()  # type: ignore
 
         client_failing = RouterSystemOneClient(opener=invalid_opener, fallback_to_deterministic=False)
