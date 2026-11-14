@@ -219,6 +219,50 @@ def test_rotate_skips_an_account_that_was_just_blocked(monkeypatch, provider, tm
     assert calls[1][calls[1].index("-Account") + 1] == "3"
 
 
+def test_an_account_out_of_credits_rests_for_hours_not_minutes():
+    """USER_QUOTA_REACHED lasts until the quota resets, so it must not be retried soon."""
+    credits = GoogleFlowKitMediaProvider._block_seconds_for(
+        "RpcError: PUBLIC_ERROR_USER_QUOTA_REACHED"
+    )
+    traffic = GoogleFlowKitMediaProvider._block_seconds_for(
+        "RpcError: PUBLIC_ERROR_UNUSUAL_ACTIVITY_TOO_MUCH_TRAFFIC"
+    )
+
+    assert credits >= 3600
+    assert traffic < credits
+
+
+def test_rotate_goes_back_to_the_account_that_last_rendered(monkeypatch, provider, tmp_path):
+    """Google lets a trusted account render a burst before blocking it."""
+    registry = tmp_path / "flow-accounts.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "active_account": 1,
+                "accounts": [
+                    {"id": 1, "project_id": "p1"},
+                    {"id": 2, "project_id": "p2"},
+                    {"id": 3, "project_id": "p3"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    calls = []
+    monkeypatch.setattr(media.subprocess, "run", lambda cmd, **kwargs: calls.append(cmd) or _Result())
+    monkeypatch.setattr(provider, "_check_connected", lambda: None)
+    provider._last_good_account = 3
+
+    assert provider.rotate_to_next_account() is True
+    assert calls[0][calls[0].index("-Account") + 1] == "3"
+
+
 def test_rotate_waits_when_every_account_is_blocked(monkeypatch, provider, tmp_path):
     registry = tmp_path / "flow-accounts.json"
     registry.write_text(

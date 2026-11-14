@@ -1421,6 +1421,21 @@ class GoogleFlowKitMediaProvider:
         # blocked. Rotating straight back into a just-blocked account is what turned
         # a block into a 92-switches-per-hour churn with zero renders.
         self._blocked_accounts: dict[int, float] = {}
+        # The account that last rendered a clip. Google lets a trusted account
+        # render a burst before blocking it, so it is worth going back to.
+        self._last_good_account: int | None = None
+
+    def _active_account_id(self) -> int | None:
+        """Id of the account marked active in data/flow-accounts.json."""
+        try:
+            data = json.loads(self._ACCOUNTS_FILE.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return None
+        active = data.get("active_account")
+        for entry in data.get("accounts") or []:
+            if entry.get("id") == active:
+                return active
+        return None
 
     def _active_project_id(self) -> str:
         """Project UUID of the account marked active in data/flow-accounts.json.
@@ -1487,7 +1502,30 @@ class GoogleFlowKitMediaProvider:
             )
         )
 
-    def rotate_to_next_account(self) -> bool:
+    @staticmethod
+    def _block_seconds_for(message: str) -> int:
+        """How long an account must rest after this error.
+
+        Running out of credits (USER_QUOTA_REACHED) lasts until the quota
+        resets, so that account is parked for hours. A traffic block
+        (unusual activity) clears much sooner.
+        """
+        low = str(message).lower()
+        credit_markers = (
+            "public_error_user_quota_reached",
+            "public_error_per_model_daily_quota_reached",
+            "out of credits",
+            "insufficient_credits",
+            "quota_reached",
+            "quota_exceeded",
+            "daily_quota",
+            "user_quota",
+        )
+        if any(marker in low for marker in credit_markers):
+            return int(os.getenv("NIGHTMARE_FLOWKIT_CREDIT_BLOCK_SECONDS", "21600"))
+        return int(os.getenv("NIGHTMARE_FLOWKIT_ACCOUNT_BLOCK_SECONDS", "1800"))
+
+    def rotate_to_next_account(self, message: str = "") -> bool:
         """Sequentially rotate to the next registered Flow account.
 
         Runs scripts/switch-account.ps1 -Account <next_id> -NoRestart.
@@ -1508,13 +1546,21 @@ class GoogleFlowKitMediaProvider:
         if idx < 0:
             return False
 
-        block_s = int(os.getenv("NIGHTMARE_FLOWKIT_ACCOUNT_BLOCK_SECONDS", "1800"))
+        block_s = self._block_seconds_for(message)
         now = time.time()
         self._blocked_accounts[current_active] = now + block_s
 
         # Prefer the next account in cyclic order that is not serving a block.
         order = [(idx + n) % len(accounts) for n in range(1, len(accounts))]
         free = [i for i in order if self._blocked_accounts.get(accounts[i].get("id"), 0) <= now]
+        # A trusted account renders a burst before Google blocks it, so go back
+        # to the one that last produced a clip instead of a cold account.
+        trusted = [
+            i for i in free
+            if accounts[i].get("id") == self._last_good_account
+        ]
+        if trusted:
+            free = trusted + [i for i in free if i not in trusted]
         if free:
             next_idx = free[0]
             wait_s = 0.0
@@ -1781,7 +1827,7 @@ class GoogleFlowKitMediaProvider:
 
         if not media_ids and not urls:
             err_text = str(result.get("error") or result)
-            if self._is_quota_error(err_text) and self.rotate_to_next_account():
+            if self._is_quota_error(err_text) and self.rotate_to_next_account(err_text):
                 return self.generate_image(prompt, output_path)
             raise RuntimeError(f"Flowkit generate-image returned no media_ids or urls: {result}")
 
@@ -1827,7 +1873,7 @@ class GoogleFlowKitMediaProvider:
             try:
                 media_id = self._upload_image(image_path, base=base, project_id=project_id)
             except FlowAccountBlocked as blocked:
-                if self.rotate_to_next_account():
+                if self.rotate_to_next_account(str(blocked)):
                     return self.generate_video(image_path, motion_prompt, output_path, duration_s)
                 raise RuntimeError(f"Flowkit blocked the account and no other account is free: {blocked}")
 
@@ -1860,7 +1906,7 @@ class GoogleFlowKitMediaProvider:
             workflows: list = vid_result.get("workflows") or []
             if not operations and not workflows:
                 err_text = str(vid_result.get("error") or vid_result)
-                if self._is_quota_error(err_text) and self.rotate_to_next_account():
+                if self._is_quota_error(err_text) and self.rotate_to_next_account(err_text):
                     return self.generate_video(image_path, motion_prompt, output_path, duration_s)
                 raise RuntimeError(f"Flowkit generate-video returned no operations/workflows: {vid_result}")
 
@@ -1893,7 +1939,7 @@ class GoogleFlowKitMediaProvider:
                             break
                     elif op_status in {"MEDIA_GENERATION_STATUS_FAILED", "FAILED"}:
                         err_msg = op_item.get("error") or op_status
-                        if self._is_quota_error(err_msg) and self.rotate_to_next_account():
+                        if self._is_quota_error(err_msg) and self.rotate_to_next_account(err_msg):
                             return self.generate_video(image_path, motion_prompt, output_path, duration_s)
                         raise RuntimeError(f"Flowkit video operation failed: {err_msg}")
 
@@ -1910,7 +1956,7 @@ class GoogleFlowKitMediaProvider:
                     break
                 err = status.get("error") or ""
                 if err:
-                    if self._is_quota_error(err) and self.rotate_to_next_account():
+                    if self._is_quota_error(err) and self.rotate_to_next_account(err):
                         return self.generate_video(image_path, motion_prompt, output_path, duration_s)
                     # UNSAFE_GENERATION = policy block — surface it; other errors are fatal
                     if "UNSAFE" in err:
@@ -1926,6 +1972,7 @@ class GoogleFlowKitMediaProvider:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_bytes(video_bytes)
             remove_video_watermark(output_path)
+            self._last_good_account = self._active_account_id()
             return output_path
         except Exception as exc:
             if not self.allow_fallback:
