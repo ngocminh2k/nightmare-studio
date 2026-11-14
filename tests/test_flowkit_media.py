@@ -398,6 +398,27 @@ def test_upload_image_rejects_a_response_without_a_media_id(monkeypatch, provide
         provider._upload_image(image)
 
 
+def test_upload_image_raises_a_block_signal_instead_of_waiting_the_hold_out(monkeypatch, provider, tmp_path):
+    """The upload endpoint reports the same per-account block as the generate one."""
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"\x89PNG")
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1:8100/api/flow/upload-image-file",
+        502,
+        "Bad Gateway",
+        {},
+        io.BytesIO(b'{"detail":"FlowBatchError: PUBLIC_ERROR_UNUSUAL_ACTIVITY local cooldown active; retry in about 328s"}'),
+    )
+
+    def opener(request, timeout=None):
+        raise error
+
+    monkeypatch.setattr(media, "urlopen", opener)
+
+    with pytest.raises(media.FlowAccountBlocked):
+        provider._upload_image(image)
+
+
 def test_character_media_id_is_uploaded_once_and_cached(monkeypatch, provider):
     uploads = []
 

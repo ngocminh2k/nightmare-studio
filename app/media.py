@@ -37,6 +37,14 @@ FLOW_VIDEO_DURATIONS = (4, 6, 8, 10)
 MAX_VIDEO_DURATION_S = 10
 
 
+class FlowAccountBlocked(RuntimeError):
+    """Google blocked the active Flow account.
+
+    The block is per Google account, so a rotation is the way out - waiting on
+    the same account just wastes the hold.
+    """
+
+
 def clamp_video_duration(duration_s: int | None, default: int = 8) -> int:
     """Snap a requested clip length onto a duration Flow accepts, capped at 10s."""
     value = int(duration_s or default)
@@ -1704,6 +1712,14 @@ class GoogleFlowKitMediaProvider:
                     result = json.loads(resp.read().decode("utf-8"))
                 break
             except HTTPError as exc:
+                body = ""
+                try:
+                    body = exc.read().decode("utf-8")
+                except Exception:
+                    pass
+                if self._is_quota_error(body):
+                    # Same per-account block the generate endpoint reports.
+                    raise FlowAccountBlocked(body) from exc
                 if exc.code == 502:
                     self._wait_for_cooldown(base)
                     continue
@@ -1808,7 +1824,12 @@ class GoogleFlowKitMediaProvider:
             base, project_id = self._resolve_active()
 
             # Step 1: upload source frame → get media_id
-            media_id = self._upload_image(image_path, base=base, project_id=project_id)
+            try:
+                media_id = self._upload_image(image_path, base=base, project_id=project_id)
+            except FlowAccountBlocked as blocked:
+                if self.rotate_to_next_account():
+                    return self.generate_video(image_path, motion_prompt, output_path, duration_s)
+                raise RuntimeError(f"Flowkit blocked the account and no other account is free: {blocked}")
 
             # Step 2: submit image-to-video generation
             # omni_flash: reliable, free first-frame i2v, Veo r2v/chaining broken on new API
