@@ -37,6 +37,14 @@ FLOW_VIDEO_DURATIONS = (4, 6, 8, 10)
 MAX_VIDEO_DURATION_S = 10
 
 
+class FlowAccountBlocked(RuntimeError):
+    """Google blocked the active Flow account.
+
+    The block is per Google account, so a rotation is the way out - waiting on
+    the same account just wastes the hold.
+    """
+
+
 def clamp_video_duration(duration_s: int | None, default: int = 8) -> int:
     """Snap a requested clip length onto a duration Flow accepts, capped at 10s."""
     value = int(duration_s or default)
@@ -1409,6 +1417,10 @@ class GoogleFlowKitMediaProvider:
             Path(__file__).resolve().parents[1] / "assets" / "mrkane-flow-reference.png"
         )
         self._character_media_id_cache: dict[tuple[str, str], str] = {}
+        # Google account id -> epoch seconds until which that account is considered
+        # blocked. Rotating straight back into a just-blocked account is what turned
+        # a block into a 92-switches-per-hour churn with zero renders.
+        self._blocked_accounts: dict[int, float] = {}
 
     def _active_project_id(self) -> str:
         """Project UUID of the account marked active in data/flow-accounts.json.
@@ -1448,16 +1460,21 @@ class GoogleFlowKitMediaProvider:
 
     @staticmethod
     def _is_quota_error(message: str) -> bool:
+        """A per-account block - rotating to the next account is what clears it.
+
+        Google's unusual-activity answer is per Google account: account 7 stayed
+        blocked for hours while another account rendered fine in the meantime.
+        """
         low = str(message).lower()
         return any(
             k in low
             for k in (
                 "public_error_per_model_daily_quota_reached",
                 "public_error_user_quota_reached",
-                "public_error_unusual_activity_too_much_traffic",
-                "unusual_activity",
+                "public_error_unusual_activity",
                 "unusual activity",
                 "too_much_traffic",
+                "local cooldown active",
                 "quota_reached",
                 "quota_exceeded",
                 "resource_exhausted",
@@ -1467,7 +1484,6 @@ class GoogleFlowKitMediaProvider:
                 "insufficient_credits",
                 "daily_quota",
                 "user_quota",
-                "429",
             )
         )
 
@@ -1489,22 +1505,37 @@ class GoogleFlowKitMediaProvider:
             if a.get("id") == current_active:
                 idx = i
                 break
-        next_idx = (idx + 1) % len(accounts)
+        if idx < 0:
+            return False
+
+        block_s = int(os.getenv("NIGHTMARE_FLOWKIT_ACCOUNT_BLOCK_SECONDS", "1800"))
+        now = time.time()
+        self._blocked_accounts[current_active] = now + block_s
+
+        # Prefer the next account in cyclic order that is not serving a block.
+        order = [(idx + n) % len(accounts) for n in range(1, len(accounts))]
+        free = [i for i in order if self._blocked_accounts.get(accounts[i].get("id"), 0) <= now]
+        if free:
+            next_idx = free[0]
+            wait_s = 0.0
+        else:
+            # Every account is blocked: rest until the earliest one frees up
+            # instead of hammering them in a loop.
+            next_idx = min(order, key=lambda i: self._blocked_accounts.get(accounts[i].get("id"), 0))
+            wait_s = max(0.0, self._blocked_accounts.get(accounts[next_idx].get("id"), 0) - now)
+            print(
+                f"\n[FlowKit Account Rotation] All {len(accounts)} accounts are blocked. "
+                f"Waiting {wait_s:.0f}s before trying account {accounts[next_idx].get('id')}...",
+                flush=True,
+            )
+            time.sleep(wait_s)
+
         next_account = accounts[next_idx].get("id")
         if next_account == current_active:
             return False
 
-        if next_idx <= idx:
-            cooldown_s = int(os.getenv("NIGHTMARE_FLOWKIT_ALL_ACCOUNTS_COOLDOWN", "180"))
-            print(
-                f"\n[FlowKit Account Rotation] All {len(accounts)} registered accounts reached quota. "
-                f"Waiting {cooldown_s}s for rolling quota reset before trying account {next_account}...",
-                flush=True,
-            )
-            time.sleep(cooldown_s)
-
         print(
-            f"\n[FlowKit Account Rotation] Quota exhausted on account {current_active}. "
+            f"\n[FlowKit Account Rotation] Account {current_active} is blocked. "
             f"Rotating sequentially to account {next_account}...",
             flush=True,
         )
@@ -1554,13 +1585,6 @@ class GoogleFlowKitMediaProvider:
                 if remaining_s <= 0:
                     return observed
                 observed = max(observed, remaining_s)
-                print(
-                    f"\n[FlowKit Cooldown] Unusual activity hold active ({remaining_s:.1f}s). "
-                    "Rotating to next account sequentially...",
-                    flush=True,
-                )
-                if self.rotate_to_next_account():
-                    return 0.0
                 sleep_chunk = min(remaining_s + 5.0, 60.0)
                 import logging
 
@@ -1600,12 +1624,17 @@ class GoogleFlowKitMediaProvider:
                 except Exception:
                     pass
                 if self._is_quota_error(err_body):
+                    # Per-account block: the caller rotates to the next account.
+                    # switch-account.ps1 clears FlowKit's hold on the way, so a
+                    # local-cooldown answer is handled by the same rotation.
                     return {"error": err_body}
-                if exc.code != 502:
+                # 502 = FlowKit cooldown hold, 503 = extension momentarily
+                # disconnected (an account switch restarts Chromium). Both are
+                # transient, so retry instead of killing the whole video job.
+                if exc.code not in (502, 503):
                     raise
-                # FlowKit returns 502 during a cooldown hold, and also while the
-                # extension reconnects after an account switch. Re-read the active
-                # project so a mid-flight switch heals instead of failing the clip.
+                # Re-read the active project so a mid-flight switch heals
+                # instead of failing the clip.
                 if "project_id" in payload:
                     payload["project_id"] = self.project_id
                 if self._wait_for_cooldown(base or self.base) > 0:
@@ -1613,7 +1642,7 @@ class GoogleFlowKitMediaProvider:
                     continue
                 soft_failures += 1
                 if soft_failures >= 20:
-                    raise RuntimeError(f"Flowkit kept returning 502 on {path}: {exc}") from exc
+                    raise RuntimeError(f"Flowkit kept returning {exc.code} on {path}: {exc}") from exc
                 time.sleep(10)
 
     def _check_connected(self) -> None:
@@ -1683,6 +1712,14 @@ class GoogleFlowKitMediaProvider:
                     result = json.loads(resp.read().decode("utf-8"))
                 break
             except HTTPError as exc:
+                body = ""
+                try:
+                    body = exc.read().decode("utf-8")
+                except Exception:
+                    pass
+                if self._is_quota_error(body):
+                    # Same per-account block the generate endpoint reports.
+                    raise FlowAccountBlocked(body) from exc
                 if exc.code == 502:
                     self._wait_for_cooldown(base)
                     continue
@@ -1787,7 +1824,12 @@ class GoogleFlowKitMediaProvider:
             base, project_id = self._resolve_active()
 
             # Step 1: upload source frame → get media_id
-            media_id = self._upload_image(image_path, base=base, project_id=project_id)
+            try:
+                media_id = self._upload_image(image_path, base=base, project_id=project_id)
+            except FlowAccountBlocked as blocked:
+                if self.rotate_to_next_account():
+                    return self.generate_video(image_path, motion_prompt, output_path, duration_s)
+                raise RuntimeError(f"Flowkit blocked the account and no other account is free: {blocked}")
 
             # Step 2: submit image-to-video generation
             # omni_flash: reliable, free first-frame i2v, Veo r2v/chaining broken on new API

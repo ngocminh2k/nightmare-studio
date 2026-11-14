@@ -117,12 +117,26 @@ def test_resolve_active_falls_back_to_the_static_instance(monkeypatch, provider)
     assert settings.project_id == "static-project"
 
 
-def test_is_quota_error_recognises_the_throttle_signatures():
-    assert GoogleFlowKitMediaProvider._is_quota_error("PUBLIC_ERROR_UNUSUAL_ACTIVITY_TOO_MUCH_TRAFFIC")
+def test_is_quota_error_covers_per_account_blocks():
+    assert GoogleFlowKitMediaProvider._is_quota_error("PUBLIC_ERROR_USER_QUOTA_REACHED")
     assert GoogleFlowKitMediaProvider._is_quota_error("out of credits")
-    assert GoogleFlowKitMediaProvider._is_quota_error("HTTP 429")
     assert not GoogleFlowKitMediaProvider._is_quota_error("prompt rejected")
     assert not GoogleFlowKitMediaProvider._is_quota_error("")
+
+
+def test_unusual_activity_is_a_per_account_block_so_the_caller_rotates():
+    """Google's unusual-activity answer is per Google account.
+
+    Measured 2026-11-15: account 7 stayed blocked for hours while another
+    account rendered fine, so rotating to the next account is the way out.
+    """
+    block = "RpcError: eb1hJf failed: [8, None, [['type.googleapis.com/google.rpc.ErrorInfo', " \
+           "['PUBLIC_ERROR_UNUSUAL_ACTIVITY_TOO_MUCH_TRAFFIC']]]]"
+    assert GoogleFlowKitMediaProvider._is_quota_error(block)
+    # FlowKit's own hold on the same error is lifted by the account switch.
+    assert GoogleFlowKitMediaProvider._is_quota_error(
+        "PUBLIC_ERROR_UNUSUAL_ACTIVITY local cooldown active; retry in about 60s"
+    )
 
 
 def test_rotate_to_next_account_needs_more_than_one_registered_account(provider):
@@ -167,6 +181,76 @@ def test_rotate_to_next_account_reports_a_failed_switch(monkeypatch, provider, t
     assert provider.rotate_to_next_account() is False
 
 
+def test_rotate_skips_an_account_that_was_just_blocked(monkeypatch, provider, tmp_path):
+    """Rotating straight back into a blocked account is what caused the churn."""
+    registry = tmp_path / "flow-accounts.json"
+
+    def write(active):
+        registry.write_text(
+            json.dumps(
+                {
+                    "active_account": active,
+                    "accounts": [
+                        {"id": 1, "project_id": "p1"},
+                        {"id": 2, "project_id": "p2"},
+                        {"id": 3, "project_id": "p3"},
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    calls = []
+    monkeypatch.setattr(media.subprocess, "run", lambda cmd, **kwargs: calls.append(cmd) or _Result())
+    monkeypatch.setattr(provider, "_check_connected", lambda: None)
+
+    write(1)
+    assert provider.rotate_to_next_account() is True
+    assert calls[0][calls[0].index("-Account") + 1] == "2"
+
+    # Account 2 answers with a block too, so it must rest instead of being used again.
+    write(2)
+    assert provider.rotate_to_next_account() is True
+    assert calls[1][calls[1].index("-Account") + 1] == "3"
+
+
+def test_rotate_waits_when_every_account_is_blocked(monkeypatch, provider, tmp_path):
+    registry = tmp_path / "flow-accounts.json"
+    registry.write_text(
+        json.dumps(
+            {
+                "active_account": 1,
+                "accounts": [{"id": 1, "project_id": "p1"}, {"id": 2, "project_id": "p2"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    slept = []
+    monkeypatch.setattr(media.time, "sleep", lambda seconds: slept.append(seconds))
+    monkeypatch.setattr(media.subprocess, "run", lambda cmd, **kwargs: _Result())
+    monkeypatch.setattr(provider, "_check_connected", lambda: None)
+    monkeypatch.setenv("NIGHTMARE_FLOWKIT_ACCOUNT_BLOCK_SECONDS", "600")
+
+    import time as _time
+
+    now = _time.time()
+    provider._blocked_accounts = {1: now + 900, 2: now + 1200}
+
+    assert provider.rotate_to_next_account() is True
+    assert slept and slept[0] > 0
+
+
 def test_wait_for_cooldown_returns_zero_without_a_hold(monkeypatch, provider):
     monkeypatch.setattr(
         media, "urlopen", _routes({"http://127.0.0.1:8100/api/flow/status": {"generation_throttle": {}}})
@@ -175,21 +259,49 @@ def test_wait_for_cooldown_returns_zero_without_a_hold(monkeypatch, provider):
     assert provider._wait_for_cooldown() == 0.0
 
 
-def test_wait_for_cooldown_rotates_the_account_instead_of_waiting(monkeypatch, provider):
-    monkeypatch.setattr(
-        media,
-        "urlopen",
-        _routes(
-            {
-                "http://127.0.0.1:8100/api/flow/status": {
-                    "generation_throttle": {"cooldown_active": True, "cooldown_remaining_s": 30}
-                }
-            }
-        ),
-    )
-    monkeypatch.setattr(provider, "rotate_to_next_account", lambda: True)
+def test_wait_for_cooldown_does_not_rotate_the_account(monkeypatch, provider):
+    """Rotating lifts FlowKit's hold (clear-hijack) and submits into the block again."""
+    polls = {"count": 0}
 
-    assert provider._wait_for_cooldown() == 0.0
+    def opener(request, timeout=None):
+        polls["count"] += 1
+        active = polls["count"] <= 2
+        return _Response(
+            {"generation_throttle": {"cooldown_active": active, "cooldown_remaining_s": 30}}
+        )
+
+    monkeypatch.setattr(media, "urlopen", opener)
+    monkeypatch.setattr(media.time, "sleep", lambda seconds: None)
+    rotated = []
+    monkeypatch.setattr(provider, "rotate_to_next_account", lambda: rotated.append(True) or True)
+
+    provider._wait_for_cooldown()
+
+    assert polls["count"] == 3
+    assert rotated == []
+
+
+def test_post_hands_a_blocked_account_back_to_the_caller_for_rotation(monkeypatch, provider):
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1:8100/api/flow",
+        429,
+        "Too Many Requests",
+        {},
+        io.BytesIO(b'{"detail":"PUBLIC_ERROR_UNUSUAL_ACTIVITY local cooldown active; retry in about 60s"}'),
+    )
+    attempts = {"count": 0}
+
+    def opener(request, timeout=None):
+        attempts["count"] += 1
+        raise error
+
+    monkeypatch.setattr(media, "urlopen", opener)
+
+    result = provider._post("/api/flow/generate-image", {"prompt": "x"})
+
+    assert "error" in result
+    assert "PUBLIC_ERROR_UNUSUAL_ACTIVITY" in result["error"]
+    assert attempts["count"] == 1
 
 
 def test_post_returns_the_decoded_json(monkeypatch, provider):
@@ -219,6 +331,24 @@ def test_post_returns_the_body_for_a_quota_error(monkeypatch, provider):
 
 def test_post_retries_a_502_after_the_cooldown_clears(monkeypatch, provider):
     error = urllib.error.HTTPError("http://127.0.0.1:8100/api/flow", 502, "Bad Gateway", {}, None)
+    attempts = {"count": 0}
+
+    def opener(request, timeout=None):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise error
+        return _Response({"ok": True})
+
+    monkeypatch.setattr(media, "urlopen", opener)
+    monkeypatch.setattr(provider, "_wait_for_cooldown", lambda base="": 0.0)
+    monkeypatch.setattr(media.time, "sleep", lambda seconds: None)
+
+    assert provider._post("/api/flow/generate-image", {"prompt": "x"}) == {"ok": True}
+    assert attempts["count"] == 2
+
+
+def test_post_retries_a_503_while_the_extension_reconnects(monkeypatch, provider):
+    error = urllib.error.HTTPError("http://127.0.0.1:8100/api/flow", 503, "Service Unavailable", {}, None)
     attempts = {"count": 0}
 
     def opener(request, timeout=None):
@@ -265,6 +395,27 @@ def test_upload_image_rejects_a_response_without_a_media_id(monkeypatch, provide
     monkeypatch.setattr(media, "urlopen", _routes({"http://127.0.0.1:8100/api/flow/upload-image-file": {}}))
 
     with pytest.raises(RuntimeError, match="no media_id"):
+        provider._upload_image(image)
+
+
+def test_upload_image_raises_a_block_signal_instead_of_waiting_the_hold_out(monkeypatch, provider, tmp_path):
+    """The upload endpoint reports the same per-account block as the generate one."""
+    image = tmp_path / "frame.png"
+    image.write_bytes(b"\x89PNG")
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1:8100/api/flow/upload-image-file",
+        502,
+        "Bad Gateway",
+        {},
+        io.BytesIO(b'{"detail":"FlowBatchError: PUBLIC_ERROR_UNUSUAL_ACTIVITY local cooldown active; retry in about 328s"}'),
+    )
+
+    def opener(request, timeout=None):
+        raise error
+
+    monkeypatch.setattr(media, "urlopen", opener)
+
+    with pytest.raises(media.FlowAccountBlocked):
         provider._upload_image(image)
 
 
