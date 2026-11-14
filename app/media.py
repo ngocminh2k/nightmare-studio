@@ -1409,6 +1409,10 @@ class GoogleFlowKitMediaProvider:
             Path(__file__).resolve().parents[1] / "assets" / "mrkane-flow-reference.png"
         )
         self._character_media_id_cache: dict[tuple[str, str], str] = {}
+        # Google account id -> epoch seconds until which that account is considered
+        # blocked. Rotating straight back into a just-blocked account is what turned
+        # a block into a 92-switches-per-hour churn with zero renders.
+        self._blocked_accounts: dict[int, float] = {}
 
     def _active_project_id(self) -> str:
         """Project UUID of the account marked active in data/flow-accounts.json.
@@ -1447,36 +1451,22 @@ class GoogleFlowKitMediaProvider:
         return self._resolve_active()[1]
 
     @staticmethod
-    def _is_cooldown_error(message: str) -> bool:
-        """Google's unusual-activity block - global, not per account.
+    def _is_quota_error(message: str) -> bool:
+        """A per-account block - rotating to the next account is what clears it.
 
-        Every account was blocked at the same time, so rotating cannot help:
-        switch-account.ps1 restarts Chromium and calls clear-hijack, which
-        lifts FlowKit's hold and submits straight back into the same block.
-        The only way through is to stop submitting and let the hold expire.
+        Google's unusual-activity answer is per Google account: account 7 stayed
+        blocked for hours while another account rendered fine in the meantime.
         """
         low = str(message).lower()
         return any(
             k in low
             for k in (
-                "local cooldown active",
+                "public_error_per_model_daily_quota_reached",
+                "public_error_user_quota_reached",
                 "public_error_unusual_activity",
                 "unusual activity",
                 "too_much_traffic",
-            )
-        )
-
-    @staticmethod
-    def _is_quota_error(message: str) -> bool:
-        """A per-account credit/quota exhaustion - the one case where rotating helps."""
-        low = str(message).lower()
-        if "local cooldown active" in low:
-            return False
-        return any(
-            k in low
-            for k in (
-                "public_error_per_model_daily_quota_reached",
-                "public_error_user_quota_reached",
+                "local cooldown active",
                 "quota_reached",
                 "quota_exceeded",
                 "resource_exhausted",
@@ -1507,22 +1497,37 @@ class GoogleFlowKitMediaProvider:
             if a.get("id") == current_active:
                 idx = i
                 break
-        next_idx = (idx + 1) % len(accounts)
+        if idx < 0:
+            return False
+
+        block_s = int(os.getenv("NIGHTMARE_FLOWKIT_ACCOUNT_BLOCK_SECONDS", "1800"))
+        now = time.time()
+        self._blocked_accounts[current_active] = now + block_s
+
+        # Prefer the next account in cyclic order that is not serving a block.
+        order = [(idx + n) % len(accounts) for n in range(1, len(accounts))]
+        free = [i for i in order if self._blocked_accounts.get(accounts[i].get("id"), 0) <= now]
+        if free:
+            next_idx = free[0]
+            wait_s = 0.0
+        else:
+            # Every account is blocked: rest until the earliest one frees up
+            # instead of hammering them in a loop.
+            next_idx = min(order, key=lambda i: self._blocked_accounts.get(accounts[i].get("id"), 0))
+            wait_s = max(0.0, self._blocked_accounts.get(accounts[next_idx].get("id"), 0) - now)
+            print(
+                f"\n[FlowKit Account Rotation] All {len(accounts)} accounts are blocked. "
+                f"Waiting {wait_s:.0f}s before trying account {accounts[next_idx].get('id')}...",
+                flush=True,
+            )
+            time.sleep(wait_s)
+
         next_account = accounts[next_idx].get("id")
         if next_account == current_active:
             return False
 
-        if next_idx <= idx:
-            cooldown_s = int(os.getenv("NIGHTMARE_FLOWKIT_ALL_ACCOUNTS_COOLDOWN", "180"))
-            print(
-                f"\n[FlowKit Account Rotation] All {len(accounts)} registered accounts reached quota. "
-                f"Waiting {cooldown_s}s for rolling quota reset before trying account {next_account}...",
-                flush=True,
-            )
-            time.sleep(cooldown_s)
-
         print(
-            f"\n[FlowKit Account Rotation] Quota exhausted on account {current_active}. "
+            f"\n[FlowKit Account Rotation] Account {current_active} is blocked. "
             f"Rotating sequentially to account {next_account}...",
             flush=True,
         )
@@ -1591,7 +1596,6 @@ class GoogleFlowKitMediaProvider:
     def _post(self, path: str, payload: dict, base: str = "") -> dict:
         url = f"{base or self.base}{path}"
         soft_failures = 0
-        cooldown_waits = 0
         while True:
             body = json.dumps(payload).encode("utf-8")
             req = Request(
@@ -1611,18 +1615,10 @@ class GoogleFlowKitMediaProvider:
                     err_body = exc.read().decode("utf-8")
                 except Exception:
                     pass
-                if self._is_cooldown_error(err_body):
-                    # Global unusual-activity hold. Rotating accounts cannot
-                    # clear it, so wait it out - and stop the submit storm that
-                    # tripped the block in the first place.
-                    cooldown_waits += 1
-                    if cooldown_waits > 3:
-                        raise RuntimeError(
-                            f"Flowkit kept the unusual-activity hold for {cooldown_waits - 1} rounds on {path}: {err_body[:200]}"
-                        ) from exc
-                    self._wait_for_cooldown(base or self.base)
-                    continue
                 if self._is_quota_error(err_body):
+                    # Per-account block: the caller rotates to the next account.
+                    # switch-account.ps1 clears FlowKit's hold on the way, so a
+                    # local-cooldown answer is handled by the same rotation.
                     return {"error": err_body}
                 # 502 = FlowKit cooldown hold, 503 = extension momentarily
                 # disconnected (an account switch restarts Chromium). Both are
