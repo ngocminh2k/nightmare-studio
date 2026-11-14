@@ -235,6 +235,24 @@ def test_post_retries_a_502_after_the_cooldown_clears(monkeypatch, provider):
     assert attempts["count"] == 2
 
 
+def test_post_retries_a_503_while_the_extension_reconnects(monkeypatch, provider):
+    error = urllib.error.HTTPError("http://127.0.0.1:8100/api/flow", 503, "Service Unavailable", {}, None)
+    attempts = {"count": 0}
+
+    def opener(request, timeout=None):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise error
+        return _Response({"ok": True})
+
+    monkeypatch.setattr(media, "urlopen", opener)
+    monkeypatch.setattr(provider, "_wait_for_cooldown", lambda base="": 0.0)
+    monkeypatch.setattr(media.time, "sleep", lambda seconds: None)
+
+    assert provider._post("/api/flow/generate-image", {"prompt": "x"}) == {"ok": True}
+    assert attempts["count"] == 2
+
+
 def test_check_connected_returns_when_the_extension_is_ready(monkeypatch, provider):
     monkeypatch.setattr(media, "urlopen", _routes({"http://127.0.0.1:8100/health": {"extension_connected": True}}))
 

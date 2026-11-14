@@ -1601,11 +1601,13 @@ class GoogleFlowKitMediaProvider:
                     pass
                 if self._is_quota_error(err_body):
                     return {"error": err_body}
-                if exc.code != 502:
+                # 502 = FlowKit cooldown hold, 503 = extension momentarily
+                # disconnected (an account switch restarts Chromium). Both are
+                # transient, so retry instead of killing the whole video job.
+                if exc.code not in (502, 503):
                     raise
-                # FlowKit returns 502 during a cooldown hold, and also while the
-                # extension reconnects after an account switch. Re-read the active
-                # project so a mid-flight switch heals instead of failing the clip.
+                # Re-read the active project so a mid-flight switch heals
+                # instead of failing the clip.
                 if "project_id" in payload:
                     payload["project_id"] = self.project_id
                 if self._wait_for_cooldown(base or self.base) > 0:
@@ -1613,7 +1615,7 @@ class GoogleFlowKitMediaProvider:
                     continue
                 soft_failures += 1
                 if soft_failures >= 20:
-                    raise RuntimeError(f"Flowkit kept returning 502 on {path}: {exc}") from exc
+                    raise RuntimeError(f"Flowkit kept returning {exc.code} on {path}: {exc}") from exc
                 time.sleep(10)
 
     def _check_connected(self) -> None:
