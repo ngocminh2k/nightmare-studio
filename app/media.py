@@ -1447,17 +1447,36 @@ class GoogleFlowKitMediaProvider:
         return self._resolve_active()[1]
 
     @staticmethod
-    def _is_quota_error(message: str) -> bool:
+    def _is_cooldown_error(message: str) -> bool:
+        """Google's unusual-activity block - global, not per account.
+
+        Every account was blocked at the same time, so rotating cannot help:
+        switch-account.ps1 restarts Chromium and calls clear-hijack, which
+        lifts FlowKit's hold and submits straight back into the same block.
+        The only way through is to stop submitting and let the hold expire.
+        """
         low = str(message).lower()
+        return any(
+            k in low
+            for k in (
+                "local cooldown active",
+                "public_error_unusual_activity",
+                "unusual activity",
+                "too_much_traffic",
+            )
+        )
+
+    @staticmethod
+    def _is_quota_error(message: str) -> bool:
+        """A per-account credit/quota exhaustion - the one case where rotating helps."""
+        low = str(message).lower()
+        if "local cooldown active" in low:
+            return False
         return any(
             k in low
             for k in (
                 "public_error_per_model_daily_quota_reached",
                 "public_error_user_quota_reached",
-                "public_error_unusual_activity_too_much_traffic",
-                "unusual_activity",
-                "unusual activity",
-                "too_much_traffic",
                 "quota_reached",
                 "quota_exceeded",
                 "resource_exhausted",
@@ -1467,7 +1486,6 @@ class GoogleFlowKitMediaProvider:
                 "insufficient_credits",
                 "daily_quota",
                 "user_quota",
-                "429",
             )
         )
 
@@ -1554,13 +1572,6 @@ class GoogleFlowKitMediaProvider:
                 if remaining_s <= 0:
                     return observed
                 observed = max(observed, remaining_s)
-                print(
-                    f"\n[FlowKit Cooldown] Unusual activity hold active ({remaining_s:.1f}s). "
-                    "Rotating to next account sequentially...",
-                    flush=True,
-                )
-                if self.rotate_to_next_account():
-                    return 0.0
                 sleep_chunk = min(remaining_s + 5.0, 60.0)
                 import logging
 
@@ -1580,6 +1591,7 @@ class GoogleFlowKitMediaProvider:
     def _post(self, path: str, payload: dict, base: str = "") -> dict:
         url = f"{base or self.base}{path}"
         soft_failures = 0
+        cooldown_waits = 0
         while True:
             body = json.dumps(payload).encode("utf-8")
             req = Request(
@@ -1599,6 +1611,17 @@ class GoogleFlowKitMediaProvider:
                     err_body = exc.read().decode("utf-8")
                 except Exception:
                     pass
+                if self._is_cooldown_error(err_body):
+                    # Global unusual-activity hold. Rotating accounts cannot
+                    # clear it, so wait it out - and stop the submit storm that
+                    # tripped the block in the first place.
+                    cooldown_waits += 1
+                    if cooldown_waits > 3:
+                        raise RuntimeError(
+                            f"Flowkit kept the unusual-activity hold for {cooldown_waits - 1} rounds on {path}: {err_body[:200]}"
+                        ) from exc
+                    self._wait_for_cooldown(base or self.base)
+                    continue
                 if self._is_quota_error(err_body):
                     return {"error": err_body}
                 # 502 = FlowKit cooldown hold, 503 = extension momentarily

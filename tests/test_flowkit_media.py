@@ -117,12 +117,21 @@ def test_resolve_active_falls_back_to_the_static_instance(monkeypatch, provider)
     assert settings.project_id == "static-project"
 
 
-def test_is_quota_error_recognises_the_throttle_signatures():
-    assert GoogleFlowKitMediaProvider._is_quota_error("PUBLIC_ERROR_UNUSUAL_ACTIVITY_TOO_MUCH_TRAFFIC")
+def test_is_quota_error_only_covers_per_account_credit_exhaustion():
+    assert GoogleFlowKitMediaProvider._is_quota_error("PUBLIC_ERROR_USER_QUOTA_REACHED")
     assert GoogleFlowKitMediaProvider._is_quota_error("out of credits")
-    assert GoogleFlowKitMediaProvider._is_quota_error("HTTP 429")
     assert not GoogleFlowKitMediaProvider._is_quota_error("prompt rejected")
     assert not GoogleFlowKitMediaProvider._is_quota_error("")
+
+
+def test_unusual_activity_is_a_cooldown_not_a_quota_error():
+    """The block hits every account at once, so rotating cannot clear it."""
+    block = "PUBLIC_ERROR_UNUSUAL_ACTIVITY"
+    assert GoogleFlowKitMediaProvider._is_cooldown_error(block)
+    assert GoogleFlowKitMediaProvider._is_cooldown_error(
+        "PUBLIC_ERROR_UNUSUAL_ACTIVITY local cooldown active; retry in about 60s"
+    )
+    assert not GoogleFlowKitMediaProvider._is_quota_error(block)
 
 
 def test_rotate_to_next_account_needs_more_than_one_registered_account(provider):
@@ -175,21 +184,52 @@ def test_wait_for_cooldown_returns_zero_without_a_hold(monkeypatch, provider):
     assert provider._wait_for_cooldown() == 0.0
 
 
-def test_wait_for_cooldown_rotates_the_account_instead_of_waiting(monkeypatch, provider):
-    monkeypatch.setattr(
-        media,
-        "urlopen",
-        _routes(
-            {
-                "http://127.0.0.1:8100/api/flow/status": {
-                    "generation_throttle": {"cooldown_active": True, "cooldown_remaining_s": 30}
-                }
-            }
-        ),
+def test_wait_for_cooldown_does_not_rotate_the_account(monkeypatch, provider):
+    """Rotating lifts FlowKit's hold (clear-hijack) and submits into the block again."""
+    polls = {"count": 0}
+
+    def opener(request, timeout=None):
+        polls["count"] += 1
+        active = polls["count"] <= 2
+        return _Response(
+            {"generation_throttle": {"cooldown_active": active, "cooldown_remaining_s": 30}}
+        )
+
+    monkeypatch.setattr(media, "urlopen", opener)
+    monkeypatch.setattr(media.time, "sleep", lambda seconds: None)
+    rotated = []
+    monkeypatch.setattr(provider, "rotate_to_next_account", lambda: rotated.append(True) or True)
+
+    provider._wait_for_cooldown()
+
+    assert polls["count"] == 3
+    assert rotated == []
+
+
+def test_post_waits_out_the_unusual_activity_hold(monkeypatch, provider):
+    error = urllib.error.HTTPError(
+        "http://127.0.0.1:8100/api/flow",
+        429,
+        "Too Many Requests",
+        {},
+        io.BytesIO(b'{"detail":"PUBLIC_ERROR_UNUSUAL_ACTIVITY local cooldown active; retry in about 60s"}'),
     )
+    attempts = {"count": 0}
+
+    def opener(request, timeout=None):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise error
+        return _Response({"ok": True})
+
+    waits = []
+    monkeypatch.setattr(media, "urlopen", opener)
+    monkeypatch.setattr(provider, "_wait_for_cooldown", lambda base="": waits.append(base) or 0.0)
     monkeypatch.setattr(provider, "rotate_to_next_account", lambda: True)
 
-    assert provider._wait_for_cooldown() == 0.0
+    assert provider._post("/api/flow/generate-image", {"prompt": "x"}) == {"ok": True}
+    assert attempts["count"] == 2
+    assert len(waits) == 1
 
 
 def test_post_returns_the_decoded_json(monkeypatch, provider):
