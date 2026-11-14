@@ -128,7 +128,16 @@ Mọi script nhận `--episode-id <uuid>` (hoặc env `NIGHTMARE_EPISODE_ID`). *
 - **Windows + FFmpeg concat**: phải dùng đường dẫn **absolute POSIX** (`path.resolve().as_posix()`) trong file concat,
   nếu không sẽ resolve sai và ghép hỏng.
 - **`atempo` chỉ nhận 0.5–2.0**: giữ speed trong `[1.0, 1.35]`, cần giãn scene thì chia nhỏ lời ở bước `resegment`.
-- **Throttle Google Flow**: `PUBLIC_ERROR_UNUSUAL_ACTIVITY` → đổi account, không retry liên tục.
+- **Throttle Google Flow** — `PUBLIC_ERROR_UNUSUAL_ACTIVITY_TOO_MUCH_TRAFFIC` (RPC code 8) là
+  **giới hạn tốc độ/anti-abuse của Google**, KHÔNG phải hết quota ngày (chưa bao giờ thấy
+  `PUBLIC_ERROR_PER_MODEL_DAILY_QUOTA_REACHED` / `PUBLIC_ERROR_USER_QUOTA_REACHED` trong log).
+  Block này **theo từng Google account**: đo 2026-11-15, account 7 bị chặn hàng giờ trong khi
+  account khác vẫn render bình thường → **đổi account là cách thoát** (`switch-account.ps1` restart
+  Chromium + `clear-hijack` xoá hold của FlowKit rồi session mới submit được).
+  Lỗi của lần trước là **xoay liên tục không khoảng nghỉ**: mỗi lần xoay lại thử account vừa bị
+  chặn → đo được 92 lần đổi account/giờ mà 0 clip render. Nay `rotate_to_next_account()` ghi nhớ
+  account bị chặn và **bỏ qua nó** trong `NIGHTMARE_FLOWKIT_ACCOUNT_BLOCK_SECONDS` (mặc định 1800s).
+  Nguyên nhân gốc: `NIGHTMARE_VIDEO_CONCURRENCY=3` — giữ **1**.
 - **Reddit discovery hết story**: `data/studio.db` đã biết hết top tháng → dùng `queue <url>` với URL cụ thể.
 
 ---
